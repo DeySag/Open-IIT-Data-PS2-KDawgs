@@ -27,6 +27,11 @@ NUM_COLS = [
 def to_matrix(features: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
     cols = [c for c in NUM_COLS if c in features.columns]
     X = features[cols].copy()
+    for c in X.columns:
+        # The real feature layer emits nullable boolean columns (e.g.
+        # is_primary); coerce to float so NaN handling below is dtype-safe.
+        if pd.api.types.is_bool_dtype(X[c].dtype):
+            X[c] = X[c].astype("float64")
     # Recency NaN = "never happened": far past. Sentinel keeps it learnable.
     for c in ("days_since_last_attempt", "days_since_last_answer"):
         if c in X.columns:

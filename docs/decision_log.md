@@ -180,3 +180,9 @@ implement. Downstream consumers use `ingest.read_events(...)` with
 
 **Reason:** Avoid inventing a competing interface; flagged to the coordinator
 to confirm or redirect when the protocol lands.
+
+## 2026-10-04 - eval+features+baselines: integrate real feature layer into eval harness
+- Failure on origin/main merge (2 failed, 108 passed): eval called builder(as_of, refs, events, cps) but real build_features(as_of, source, refs) takes an EventSource; leakage tripwire flagged src/rpc/features/source.py for naming the restricted tables in its docstring.
+- Decision: get_feature_builder() now returns an adapter (DataFrameEventSource + backfill of only the mini columns the real output lacks, e.g. consec_failures/n_attempts; real columns never overwritten). run.py passes borrowers through. source.py docstring reworded to keep the tripwire strict (no test change). Baselines touched minimally and only where the dtype contract forced it: to_matrix coerces nullable boolean to float; contact_gbm.score drops the blanket fillna(0.0) in favour of to_matrix per-column NaN handling (also restores the documented recency far-past sentinel, previously zeroed by the blanket fill).
+- Assumptions: fixture contact_points missing lender/borrower keys inherit the per-ref mode from events; missing created_at means visible-from-first-event. Downcasting real null semantics inside the adapter was rejected (null-vs-0 is load-bearing).
+- Verified: full suite 110 passed, 1 skipped (pre-existing slow mark). ruff not installed here, lint unverified.

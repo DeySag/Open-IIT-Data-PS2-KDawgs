@@ -21,8 +21,10 @@ metric family (baselines vs any registered model), with n and bootstrap CIs.
 - `src/rpc/eval/registry.py` — `register_scorer(name, factory)`,
   `get_scorer(name)`, `list_scorers()`. Other agents plug models in by name;
   `run.py` scores every registered baseline plus `oracle`/`random` diagnostics.
-- Features: `get_feature_builder()` in `_minifeatures.py` returns the real
-  `src.rpc.features.build_features` when it lands; until then the TEMPORARY
+- Features: `get_feature_builder()` in `_minifeatures.py` returns an adapter
+  around the real `src.rpc.features.build_features` (in-memory event source,
+  PIT-correct; mini columns backfilled only where the real output lacks them
+  for the baselines contract); until the real layer landed it was the TEMPORARY
   DuckDB mini-features (attempt counts, answer rate, recency, network-response
   counts, source/primary) built PIT-correct (`received_at <= as_of`).
 
