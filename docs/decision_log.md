@@ -186,3 +186,113 @@ to confirm or redirect when the protocol lands.
 - Decision: get_feature_builder() now returns an adapter (DataFrameEventSource + backfill of only the mini columns the real output lacks, e.g. consec_failures/n_attempts; real columns never overwritten). run.py passes borrowers through. source.py docstring reworded to keep the tripwire strict (no test change). Baselines touched minimally and only where the dtype contract forced it: to_matrix coerces nullable boolean to float; contact_gbm.score drops the blanket fillna(0.0) in favour of to_matrix per-column NaN handling (also restores the documented recency far-past sentinel, previously zeroed by the blanket fill).
 - Assumptions: fixture contact_points missing lender/borrower keys inherit the per-ref mode from events; missing created_at means visible-from-first-event. Downcasting real null semantics inside the adapter was rejected (null-vs-0 is load-bearing).
 - Verified: full suite 110 passed, 1 skipped (pre-existing slow mark). ruff not installed here, lint unverified.
+
+## 2026-10-04 - serve: Protocol interfaces + DI factory, stubs by default
+**Decision:** the serving layer depends on three `Protocol`s
+(`EventStore`, `Scorer`, `Decider`) in `src/rpc/serve/interfaces.py`
+with in-memory stubs, injected via `create_app(event_store=…,
+scorer=…, decider=…)`. Endpoints hold collaborators on `app.state`
+so tests (and later the real modules) swap in with no endpoint
+code changes.
+**Reason:** the task mandates building against the interfaces now
+and swapping in real modules as they land; DI keeps the two
+decoupled.
+**Alternatives:** importing the real modules directly (rejected:
+they were not landed yet at build time; would couple serving to
+their evolving interfaces).
+
+## 2026-10-04 - serve: fast path is synchronous and idempotent
+**Decision:** `POST /v1/events` runs a `RecycledSignalDetector`
+synchronously per accepted event and writes suppression entries
+before the response returns. Four config-driven rules, each logged
+as evidence: `wrong_number` disposition (recycled), `third_party`
+disposition (third_party), who-is-this/name-mismatch/language-
+mismatch cue in a bot transcript (recycled), and `recycled`
+posterior from the Scorer `>= recycled_risk_threshold` (recycled).
+Idempotent on `(contact_point_ref, event_id)`; per-event latency
+recorded and bounded by `fast_path_max_latency_ms`.
+**Reason:** compliance-critical — the first credible recycled
+signal must update suppression within the request, never at the
+next batch; the same evidence must never double-suppress.
+**Alternatives:** async/background fast path (rejected: the task
+requires suppression before the response returns).
+
+## 2026-10-04 - serve: stale-score fallback is fail-safe and conservative
+**Decision:** when scores are older than `max_score_age_hours` or
+the Scorer raises, the service serves the last cached scores with
+confidence decayed by `max(confidence_decay_floor, 1 - age/max_age)`,
+downgrades any `trace` decision to `switch_contact_point` (or
+`continue` when only one contact point) with `trace=null`, keeps
+the current suppression list in force, sets `stale=true`, and never
+raises.
+**Reason:** fail-safe rule 19 — CN operations continue through a
+scorer outage while staying conservative on compliance-critical
+trace decisions.
+**Alternatives:** erroring the consumer (rejected: must never block
+the dialer); serving stale trace (rejected: never recommend trace
+from stale data).
+
+## 2026-10-04 - serve: fixed three boilerplate bugs
+**Decision:** (1) `valid_until = generated_at + validity_hours`
+(default 24h, configurable) instead of `valid_until == as_of`;
+(2) `TraceInfo` always carries `recoverable_amount` so `/v1/score`
+no longer 500s on the `trace` action; (3) `POST /v1/events`
+persists through the `EventStore` (ingest counts + fast path)
+instead of returning a hardcoded count.
+**Reason:** these were the three known bugs in the day-0 boilerplate.
+**Alternatives:** none — correctness fixes.
+
+## 2026-10-04 - serve: dial list never dead-ends; suppression one-way
+**Decision:** an account whose contact points are all excluded
+(suppressed or `invalid+recycled >= dead_contact_threshold`) still
+appears with a stated `fallback_action` (`trace` when fresh,
+`manual_review` when stale) and `fallback_reason`. Suppression is
+append-only with a monotonic `version` and `?since=version` diffs;
+removal is only possible via `POST /v1/suppression/removal-requests`
+which creates a `pending_cn_signoff` request — there is no DELETE.
+**Reason:** rule 22 (no dead ends) and rule 3 (suppression is
+one-way, removals need CN sign-off).
+**Alternatives:** omitting all-excluded accounts (rejected: leaves
+the dialer without a next action).
+
+## 2026-10-04 - serve: interface drift with landed modules (adapter needed)
+**Decision:** the real `src/rpc/ingest/store.py` `EventStore` is
+DataFrame-based (`insert_canonical(df, ingested_at)`,
+`read_events(received_before, event_types, lender_id,
+contact_point_refs) -> DataFrame`), which does NOT match the
+task's `ingest(batch, source) -> counts` Protocol. The real
+`src/rpc/decision/engine.py` keeps a legacy shim
+(`GuardrailsEngine`, `map_reason_code`, `decide_action`) with the
+same signatures the serving layer imports, so serving works against
+it unchanged (verified: 34 serve+contract tests pass on the real
+decision module). The real `ContactPointScore`
+(`src/rpc/decision/types.py`) matches the task's described fields.
+**Reason:** the serving layer was built against the task's Protocols
+with stubs; the landed EventStore chose a different (bulk,
+DataFrame) shape.
+**Alternatives:** rewriting serving to the DataFrame store now
+(rejected: out of scope; needs an adapter `ingest(batch, source)`
+that frames `InputEvent`s into a DataFrame and maps counts —
+flagged to the coordinator as the integration step).
+
+## 2026-10-04 - serve: synced main + pyproject TOML fix + serve target
+**Decision:** synced the landed modules from origin/main into the
+working tree (`decision/`, `eval/`, `features/`, `ingest/`,
+`models/`, their tests and docs) and pulled the already-committed
+`pyproject.toml` TOML fix (`per-file-ignores` inline-table key
+`:` -> `=`). Added the `serve` Makefile target (uvicorn, port 8000)
+and merged it with main's `features-dev` target.
+**Reason:** the coordinator asked to sync to the current repo state
+before building; the TOML fix was already on main and unblocks
+pytest/ruff config parsing.
+**Alternatives:** leaving the stale tree (rejected: would build
+against day-0 boilerplate).
+**Note (not fixed, outside serve ownership):** on the synced tree,
+`tests/test_decision.py`, `tests/test_features.py` and
+`tests/test_ingest.py` fail to COLLECT due to bugs in those
+workstreams' modules (`decision/__init__.py` does not re-export
+`AccountContext`; `features` has a circular import;
+`ingest/adapter.py` does not define `IngestAdapter`). These are
+pre-existing on main and belong to their respective workstreams;
+`tests/test_serve.py`, `tests/test_contracts.py` and `make smoke`
+all pass.
