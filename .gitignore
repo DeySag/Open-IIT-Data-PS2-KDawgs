@@ -1,7 +1,7 @@
 # Data and models
 data/
 models/
-eval/
+/eval/
 
 # Python
 __pycache__/

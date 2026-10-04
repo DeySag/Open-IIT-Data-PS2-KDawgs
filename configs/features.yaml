@@ -1,0 +1,83 @@
+# Feature pipeline configuration (simulation-only).
+# All values are assumptions for CN/SMEs to confirm; see docs/assumptions.md.
+# Feature code must read these via src/rpc/features/spec.py, never hard-code them.
+
+features:
+  # Recency windows in days. Dev/full sim horizon is ~180 days; keep windows
+  # short so recent windows are populated. Longer windows would be
+  # indistinguishable from the max window on short histories.
+  windows_days: [1, 3, 7, 14, 30]
+
+  # Timezone used for slot/weekday/calendar features.
+  timezone: "Asia/Kolkata"
+
+  # Time-of-day slots: [start_hour_inclusive, end_hour_exclusive) in local time.
+  slots:
+    morning: [8, 12]
+    afternoon: [12, 16]
+    evening: [16, 19]
+
+  # Ring-duration thresholds (seconds).
+  short_ring_seconds: 3.0
+
+  # Network responses counted as failure for fail-share / streak features.
+  # "answered" is the only success; everything else is a failure.
+  failure_responses:
+    - "no_answer"
+    - "busy"
+    - "switched_off"
+    - "not_reachable"
+    - "does_not_exist"
+    - "immediate_hangup"
+
+  # Response values expanded as n_<response>_W count features.
+  response_values:
+    - "switched_off"
+    - "not_reachable"
+    - "does_not_exist"
+    - "no_answer"
+    - "busy"
+
+  # Disposition values expanded as n_<disposition> count features.
+  disposition_values:
+    - "rpc"
+    - "wrong_number"
+    - "third_party"
+    - "dispute"
+    - "promise_to_pay"
+
+  # A payment confirms a contact point if it occurs within this many days
+  # AFTER an answered call or RPC disposition on that contact point.
+  payment_confirmation_days: 7
+
+  # who_answered values from voice-bot transcripts.
+  bot_who_values:
+    - "borrower"
+    - "other"
+    - "unknown"
+
+  # Field-visit outcomes expanded as visit count features.
+  visit_outcomes:
+    - "locked_premises"
+    - "nobody_of_that_name"
+    - "met_borrower"
+
+  # Calendar holidays (YYYY-MM-DD, simulation-only illustrative list).
+  holidays:
+    - "2026-08-15"
+    - "2026-10-02"
+    - "2026-11-08"
+
+labels:
+  # Observed-label window: RPC disposition with occurred_at in (as_of, as_of + N days].
+  rpc_next_days: 7
+
+# Columns that must never appear in feature output. If any are found in
+# source tables they are dropped before use and reported.
+banned_columns:
+  - "ground_truth"
+  - "true_state"
+  - "true_avoidance"
+  - "true_borrower_avoidance"
+  - "shared_reason"
+  - "policy_action"

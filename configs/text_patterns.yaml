@@ -1,0 +1,122 @@
+# Rule-based text cues for agent remarks and bot transcripts (v0, simulation-only).
+# All patterns are case-insensitive regex fragments matched against raw
+# remark/transcript text. They use only observable phrasing (Hinglish and
+# common spelling variants) and MUST NEVER contain internal hidden-state
+# names (valid_reachable, avoiding, temp_unreachable, switched_off_long,
+# recycled, invalid, true_state, ground_truth). tests/test_features.py
+# enforces this with a scan.
+# All values below are assumptions for CN/SMEs to confirm.
+
+# Hindi number words -> months, for switched_off_months_max extraction.
+# Variants tolerate common spelling differences.
+hindi_numbers:
+  ek: 1
+  do: 2
+  teen: 3
+  tin: 3
+  char: 4
+  chaar: 4
+  paanch: 5
+  panch: 5
+  che: 6
+  chhah: 6
+  chhe: 6
+  saat: 7
+  sath: 7
+  aath: 8
+  aanth: 8
+  nau: 9
+  nav: 9
+  das: 10
+  dus: 10
+  gyarah: 11
+  barah: 12
+
+# Month-unit words (singular/plural/Hinglish variants).
+month_units:
+  - "mahine"
+  - "mahina"
+  - "mahinon"
+  - "maheene"
+  - "months?"
+  - "mnth"
+
+# Year-unit words (convert at 12 months for switched_off_months_max).
+year_units:
+  - "saals?"
+  - "sal"
+  - "years?"
+
+patterns:
+  # Phone appears switched off, e.g. "number band hai 2 mahine se".
+  switched_off_cue:
+    - "n[au]mb[ae]r\\s*b[ae]?ndh?\\s*(hai|he|h)"
+    - "phone\\s*b[ae]?ndh?\\s*(hai|he|h)"
+    - "mobile\\s*b[ae]?ndh?\\s*(hai|he|h)"
+    - "switch\\s*off\\s*(hai|he|h)"
+    - "switched\\s*off"
+    - "set\\s*off\\s*(hai|he)"
+    - "not\\s*reachable\\s*(hai|he|h|aa\\s*raha)"
+    - "phone\\s*nahi\\s*lag\\s*raha"
+    - "call\\s*nahi\\s*lag\\s*rah[ai]"
+
+  # Caller reached someone who says it is the wrong number.
+  wrong_number_cue:
+    - "wrong\\s*numb[ae]r"
+    - "rong\\s*numb[ae]r"
+    - "galat\\s*numb[ae]r"
+    - "galt\\s*numb[ae]r"
+    - "kisi\\s*aur\\s*ka\\s*numb[ae]r"
+    - "koi\\s*aur\\s*(hai|bol\\s*raha)"
+    - "yeh\\s*numb[ae]r\\s*(mera|hamara)\\s*nahi"
+    - "mera\\s*numb[ae]r\\s*nahi"
+    - "do\\s*not\\s*call.*wrong"
+
+  # Someone other than the borrower answered, e.g. "phone uthaya bhai ne".
+  third_party_cue:
+    - "phone\\s*u[dt]hay[ae]\\s*(bhai|didi|papa|mummy|pati|patni|beta|beti|dost|padosi|rishtedar|boss|bhabhi|uncle|aunty)"
+    - "(bhai|didi|papa|mummy|pati|patni|beta|beti|dost|padosi|rishtedar|bhabhi)\\s*ne\\s*(phone\\s*)?u[dt]hay[ae]"
+    - "(bhai|didi|papa|mummy|pati|patni)\\s*ne\\s*baat\\s*k[ai]"
+    - "borrower\\s*ghar\\s*par\\s*nahi"
+    - "ghar\\s*wale\\s*ne\\s*(uthaya|uthay|baat)"
+    - "family\\s*member.*(answered|picked| baat)"
+    - "saheb\\s*nahi\\s*hain.*(beta|bhai|patni)"
+
+  # Borrower seems to be dodging the call (observable phrasing only).
+  avoidance_cue:
+    - "baad\\s*me\\s*(call|phone|baat)\\s*kar"
+    - "call\\s*m[ae]t\\s*kar"
+    - "phone\\s*m[ae]t\\s*kar"
+    - "dobara\\s*(call|phone)\\s*m[ae]t"
+    - "time\\s*nahi\\s*(hai|h)"
+    - "paise\\s*nahi\\s*(hai|hain|denge|dunga)"
+    - "phone\\s*kaat\\s*diya"
+    - "call\\s*kaat\\s*d[ai]"
+    - "uthaya\\s*nahi.*jaan\\s*b[oo]jh"
+    - "avoid.*call"
+
+  # Voice-bot: the answering party asks who is calling.
+  who_is_this_cue:
+    - "kaun\\s*bol\\s*rah[ae]\\s*(hai|he)"
+    - "kon\\s*bol\\s*r[ae]h[ae]"
+    - "kaun\\s*hai"
+    - "aap\\s*kaun"
+    - "who\\s*is\\s*this"
+    - "who\\s*is\\s*speaking"
+    - "kis\\s*se\\s*baat.*chahte"
+
+  # Voice-bot: name on file does not match the answering party.
+  name_mismatch_cue:
+    - "naam\\s*(galat|alag|sahi\\s*nahi)"
+    - "wrong\\s*name"
+    - "name\\s*(mismatch|wrong|different)"
+    - "is\\s*naam\\s*ka\\s*koi\\s*nahi"
+    - "yeh\\s*naam.*nahi\\s*(hai|suna)"
+
+  # Voice-bot: language barrier on the call.
+  language_mismatch_cue:
+    - "hindi\\s*nahi\\s*(aati|samajh)"
+    - "bhasha\\s*(nahi\\s*)?samajh"
+    - "language\\s*(problem|mismatch|issue|barrier)"
+    - "english\\s*me\\s*(baat|bolo|boliye)"
+    - "samajh\\s*nahi\\s*aa\\s*rah[ai]"
