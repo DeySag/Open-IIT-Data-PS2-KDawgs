@@ -36,7 +36,7 @@ train-models:
 	python -m src.rpc.models.train --data data/dev.parquet --config configs/sim.yaml --output models/v0/
 
 eval:
-	python -m src.rpc.eval.run --data data/dev.parquet --models models/v0/ --baselines models/baselines/ --output eval/
+	python -m src.rpc.eval.run --config configs/eval.yaml
 
 smoke:
 	python -m src.rpc.serve.smoke_test
