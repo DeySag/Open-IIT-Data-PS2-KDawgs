@@ -1,0 +1,270 @@
+# Feature layer (simulation-only)
+
+Point-in-time feature pipeline in `src/rpc/features/`. One row per phone or
+address contact point known at `as_of`, for health-model training and scoring.
+Everything here is simulation-only unless stated otherwise.
+
+## 1. Real source schemas (inspected 2026-10-04, dev simulator v0 output)
+
+Generated with `python -m src.rpc.sim.generate --config configs/sim.yaml
+--scale dev` (5000 borrowers, 13028 contact points, 220610 events).
+
+**`data/borrowers.parquet`** (5000 x 7): `borrower_id` (str, `BORR_%07d`),
+`lender_id` (str, `LENDER_%03d`, 10 lenders), `product` (str:
+secured_retail / unsecured_retail / msme / microfinance), `dpd_bucket` (str:
+X / 1-30 / 31-60 / 61-90 / 90+), `dpd_days` (int64), `outstanding` (float64,
+lognormal ~22k median), `secured` (bool). No `account_id` column: account ids
+come from events (`ACC_<borrower-seq>`); contact points without visible events
+fall back to `ACC_<borrower-seq>` deterministically.
+
+**`data/contact_points.parquet`** (13028 x 8): `contact_point_ref` (str,
+16-hex hash == `value_hash`), `borrower_id`, `lender_id`, `type` (str:
+phone 11064 / address 1964), `value_hash`, `source` (str: KYC 5055 /
+later_update 3337 / bureau 2060 / borrower_on_call 1298 / skip_trace 1278 —
+note `KYC` uppercase vs lowercase siblings), `is_primary` (bool),
+`created_at` (tz-aware UTC, spans now-365d, so some records post-date the
+event horizon and are correctly excluded by PIT filtering). **No
+`shared_reason` or other hidden column is present**; the loader still selects
+an allow-list and reports anything unexpected (see `dropped_columns`).
+
+**`data/events.parquet`** (220610 x 9): `event_id` (str uuid, 0 duplicates),
+`event_type` (str: **only `dial_attempt` in simulator v0**),
+`lender_id`, `borrower_id`, `account_id`, `contact_point_ref`,
+`occurred_at` / `received_at` (ISO-8601 strings with `+00:00`; received lags
+occurred by 1-60 min), `payload` (JSON string, exactly one key set:
+`{network_response, ring_seconds}`). Network responses observed: no_answer
+99329 / answered 33264 / switched_off 33153 / not_reachable 21986 /
+does_not_exist 11054 / immediate_hangup 11015 / busy 10809. Event horizon:
+2026-04-07 -> 2026-10-04 (~180 days, despite the "30 days" note in the task;
+windows 1/3/7/14/30 are all usable).
+
+**Missing from simulator v0 (feature code handles them, all null/0 here):**
+`disposition`, `bot_transcript`, `field_visit`, `contact_point_update`,
+`payment` events; therefore remark/bot/field/update/payment/agent features
+are unpopulated on v0 data (null rates ~100%, expected). No
+`ground_truth.parquet` or `policy_log.parquet` exists; nothing in
+`src/rpc/features/` references them (asserted in tests). No `agent_id` is
+observed anywhere, so `agent_wrong_number_rate` is skipped with this note.
+
+## 2. Point-in-time contract
+
+Visibility = `received_at <= as_of`; window membership = `occurred_at`.
+Dedup on `event_id` keeps earliest `received_at`. Universe = contact points
+with `created_at <= as_of` plus refs first seen in visible events. No post-
+`as_of` data is touched for any reason. Never-attempted rows exist with
+`has_any_attempt=false`, counts 0, rates/days-since null. Slots use
+Asia/Kolkata (morning 8-12, afternoon 12-16, evening 16-19, from configs).
+
+## 3. Outputs and entry points
+
+- `build_features(as_of, source, contact_point_refs=None) -> DataFrame`
+  keyed `(lender_id, borrower_id, account_id, contact_point_ref, as_of)` plus
+  `feature_snapshot_id` (sha256 of config text + as_of + event watermark) and
+  `event_watermark` (max visible `received_at`).
+- `build_training_table(as_of_dates, source)` stacks the same code path.
+- `EventSource` ABC; `ParquetEventSource` (DuckDB predicate pushdown) and
+  `DataFrameEventSource` (tests). Ground-truth tables are never opened here.
+- Labels live in `src/rpc/features/labels.py` (never imported by feature
+  code); hidden-truth joins live in `src/rpc/eval/truth.py`.
+- CLI: `python -m src.rpc.features.build --scale dev --as-of <date>`
+  (`--as-of-range start end step_days`, `--out`, `--data-dir`,
+  `--render-docs` refreshes the registry table below); `make features-dev`.
+
+## 4. Parameters
+
+All windows/thresholds/slots/holidays in `configs/features.yaml`; text
+patterns in `configs/text_patterns.yaml`. Assumptions are tracked in
+`docs/assumptions.md`; decisions in `docs/decision_log.md`.
+
+## 5. Feature registry (generated from `spec.py`; do not edit by hand)
+
+The conditional `agent_wrong_number_rate` row is emitted only when an
+`agent_id` is observed in disposition payloads (absent on simulator v0 data).
+
+<!-- REGISTRY:START -->
+| feature | group | dtype | source events | window | null semantics | description |
+|---|---|---|---|---|---|---|
+| `n_attempts_1d` | telephony | Int64 | dial_attempt | 1d | 0 when no attempts in window. | Dial attempts with occurred_at in the last 1d. |
+| `n_answered_1d` | telephony | Int64 | dial_attempt | 1d | 0 when no attempts in window. | Attempts with network_response=answered in the last 1d. |
+| `answer_rate_1d` | telephony | Float64 | dial_attempt | 1d | null when no attempts in window (never 0-imputed). | n_answered / n_attempts over the last 1d. |
+| `n_immediate_hangup_1d` | telephony | Int64 | dial_attempt | 1d | 0 when no attempts in window. | Attempts with network_response=immediate_hangup in 1d. |
+| `hangup_rate_1d` | telephony | Float64 | dial_attempt | 1d | null when no attempts in window. | n_immediate_hangup / n_attempts over 1d. |
+| `n_switched_off_1d` | telephony | Int64 | dial_attempt | 1d | 0 when no attempts in window. | Attempts with network_response=switched_off in the last 1d. |
+| `n_not_reachable_1d` | telephony | Int64 | dial_attempt | 1d | 0 when no attempts in window. | Attempts with network_response=not_reachable in the last 1d. |
+| `n_does_not_exist_1d` | telephony | Int64 | dial_attempt | 1d | 0 when no attempts in window. | Attempts with network_response=does_not_exist in the last 1d. |
+| `n_no_answer_1d` | telephony | Int64 | dial_attempt | 1d | 0 when no attempts in window. | Attempts with network_response=no_answer in the last 1d. |
+| `n_busy_1d` | telephony | Int64 | dial_attempt | 1d | 0 when no attempts in window. | Attempts with network_response=busy in the last 1d. |
+| `n_attempts_morning_1d` | telephony | Int64 | dial_attempt | 1d | 0 when no attempts in window. | Attempts placed in the morning slot (IST) in 1d. |
+| `n_attempts_afternoon_1d` | telephony | Int64 | dial_attempt | 1d | 0 when no attempts in window. | Attempts placed in the afternoon slot (IST) in 1d. |
+| `n_attempts_evening_1d` | telephony | Int64 | dial_attempt | 1d | 0 when no attempts in window. | Attempts placed in the evening slot (IST) in 1d. |
+| `answer_rate_morning_1d` | telephony | Float64 | dial_attempt | 1d | null when no attempts in that slot and window. | Answered share within the morning slot (IST) over 1d. |
+| `answer_rate_afternoon_1d` | telephony | Float64 | dial_attempt | 1d | null when no attempts in that slot and window. | Answered share within the afternoon slot (IST) over 1d. |
+| `answer_rate_evening_1d` | telephony | Float64 | dial_attempt | 1d | null when no attempts in that slot and window. | Answered share within the evening slot (IST) over 1d. |
+| `weekend_attempt_share_1d` | telephony | Float64 | dial_attempt | 1d | null when no attempts in window. | Share of attempts on Sat/Sun (IST) over 1d. |
+| `ring_seconds_mean_1d` | telephony | Float64 | dial_attempt | 1d | null when no attempts in window. | Mean ring_seconds over 1d. |
+| `ring_seconds_std_1d` | telephony | Float64 | dial_attempt | 1d | null with fewer than 2 attempts in window. | Sample std of ring_seconds over 1d. |
+| `short_ring_rate_1d` | telephony | Float64 | dial_attempt | 1d | null when no attempts in window. | Share of attempts with ring_seconds below configs short_ring_seconds. |
+| `n_attempts_3d` | telephony | Int64 | dial_attempt | 3d | 0 when no attempts in window. | Dial attempts with occurred_at in the last 3d. |
+| `n_answered_3d` | telephony | Int64 | dial_attempt | 3d | 0 when no attempts in window. | Attempts with network_response=answered in the last 3d. |
+| `answer_rate_3d` | telephony | Float64 | dial_attempt | 3d | null when no attempts in window (never 0-imputed). | n_answered / n_attempts over the last 3d. |
+| `n_immediate_hangup_3d` | telephony | Int64 | dial_attempt | 3d | 0 when no attempts in window. | Attempts with network_response=immediate_hangup in 3d. |
+| `hangup_rate_3d` | telephony | Float64 | dial_attempt | 3d | null when no attempts in window. | n_immediate_hangup / n_attempts over 3d. |
+| `n_switched_off_3d` | telephony | Int64 | dial_attempt | 3d | 0 when no attempts in window. | Attempts with network_response=switched_off in the last 3d. |
+| `n_not_reachable_3d` | telephony | Int64 | dial_attempt | 3d | 0 when no attempts in window. | Attempts with network_response=not_reachable in the last 3d. |
+| `n_does_not_exist_3d` | telephony | Int64 | dial_attempt | 3d | 0 when no attempts in window. | Attempts with network_response=does_not_exist in the last 3d. |
+| `n_no_answer_3d` | telephony | Int64 | dial_attempt | 3d | 0 when no attempts in window. | Attempts with network_response=no_answer in the last 3d. |
+| `n_busy_3d` | telephony | Int64 | dial_attempt | 3d | 0 when no attempts in window. | Attempts with network_response=busy in the last 3d. |
+| `n_attempts_morning_3d` | telephony | Int64 | dial_attempt | 3d | 0 when no attempts in window. | Attempts placed in the morning slot (IST) in 3d. |
+| `n_attempts_afternoon_3d` | telephony | Int64 | dial_attempt | 3d | 0 when no attempts in window. | Attempts placed in the afternoon slot (IST) in 3d. |
+| `n_attempts_evening_3d` | telephony | Int64 | dial_attempt | 3d | 0 when no attempts in window. | Attempts placed in the evening slot (IST) in 3d. |
+| `answer_rate_morning_3d` | telephony | Float64 | dial_attempt | 3d | null when no attempts in that slot and window. | Answered share within the morning slot (IST) over 3d. |
+| `answer_rate_afternoon_3d` | telephony | Float64 | dial_attempt | 3d | null when no attempts in that slot and window. | Answered share within the afternoon slot (IST) over 3d. |
+| `answer_rate_evening_3d` | telephony | Float64 | dial_attempt | 3d | null when no attempts in that slot and window. | Answered share within the evening slot (IST) over 3d. |
+| `weekend_attempt_share_3d` | telephony | Float64 | dial_attempt | 3d | null when no attempts in window. | Share of attempts on Sat/Sun (IST) over 3d. |
+| `ring_seconds_mean_3d` | telephony | Float64 | dial_attempt | 3d | null when no attempts in window. | Mean ring_seconds over 3d. |
+| `ring_seconds_std_3d` | telephony | Float64 | dial_attempt | 3d | null with fewer than 2 attempts in window. | Sample std of ring_seconds over 3d. |
+| `short_ring_rate_3d` | telephony | Float64 | dial_attempt | 3d | null when no attempts in window. | Share of attempts with ring_seconds below configs short_ring_seconds. |
+| `n_attempts_7d` | telephony | Int64 | dial_attempt | 7d | 0 when no attempts in window. | Dial attempts with occurred_at in the last 7d. |
+| `n_answered_7d` | telephony | Int64 | dial_attempt | 7d | 0 when no attempts in window. | Attempts with network_response=answered in the last 7d. |
+| `answer_rate_7d` | telephony | Float64 | dial_attempt | 7d | null when no attempts in window (never 0-imputed). | n_answered / n_attempts over the last 7d. |
+| `n_immediate_hangup_7d` | telephony | Int64 | dial_attempt | 7d | 0 when no attempts in window. | Attempts with network_response=immediate_hangup in 7d. |
+| `hangup_rate_7d` | telephony | Float64 | dial_attempt | 7d | null when no attempts in window. | n_immediate_hangup / n_attempts over 7d. |
+| `n_switched_off_7d` | telephony | Int64 | dial_attempt | 7d | 0 when no attempts in window. | Attempts with network_response=switched_off in the last 7d. |
+| `n_not_reachable_7d` | telephony | Int64 | dial_attempt | 7d | 0 when no attempts in window. | Attempts with network_response=not_reachable in the last 7d. |
+| `n_does_not_exist_7d` | telephony | Int64 | dial_attempt | 7d | 0 when no attempts in window. | Attempts with network_response=does_not_exist in the last 7d. |
+| `n_no_answer_7d` | telephony | Int64 | dial_attempt | 7d | 0 when no attempts in window. | Attempts with network_response=no_answer in the last 7d. |
+| `n_busy_7d` | telephony | Int64 | dial_attempt | 7d | 0 when no attempts in window. | Attempts with network_response=busy in the last 7d. |
+| `n_attempts_morning_7d` | telephony | Int64 | dial_attempt | 7d | 0 when no attempts in window. | Attempts placed in the morning slot (IST) in 7d. |
+| `n_attempts_afternoon_7d` | telephony | Int64 | dial_attempt | 7d | 0 when no attempts in window. | Attempts placed in the afternoon slot (IST) in 7d. |
+| `n_attempts_evening_7d` | telephony | Int64 | dial_attempt | 7d | 0 when no attempts in window. | Attempts placed in the evening slot (IST) in 7d. |
+| `answer_rate_morning_7d` | telephony | Float64 | dial_attempt | 7d | null when no attempts in that slot and window. | Answered share within the morning slot (IST) over 7d. |
+| `answer_rate_afternoon_7d` | telephony | Float64 | dial_attempt | 7d | null when no attempts in that slot and window. | Answered share within the afternoon slot (IST) over 7d. |
+| `answer_rate_evening_7d` | telephony | Float64 | dial_attempt | 7d | null when no attempts in that slot and window. | Answered share within the evening slot (IST) over 7d. |
+| `weekend_attempt_share_7d` | telephony | Float64 | dial_attempt | 7d | null when no attempts in window. | Share of attempts on Sat/Sun (IST) over 7d. |
+| `ring_seconds_mean_7d` | telephony | Float64 | dial_attempt | 7d | null when no attempts in window. | Mean ring_seconds over 7d. |
+| `ring_seconds_std_7d` | telephony | Float64 | dial_attempt | 7d | null with fewer than 2 attempts in window. | Sample std of ring_seconds over 7d. |
+| `short_ring_rate_7d` | telephony | Float64 | dial_attempt | 7d | null when no attempts in window. | Share of attempts with ring_seconds below configs short_ring_seconds. |
+| `n_attempts_14d` | telephony | Int64 | dial_attempt | 14d | 0 when no attempts in window. | Dial attempts with occurred_at in the last 14d. |
+| `n_answered_14d` | telephony | Int64 | dial_attempt | 14d | 0 when no attempts in window. | Attempts with network_response=answered in the last 14d. |
+| `answer_rate_14d` | telephony | Float64 | dial_attempt | 14d | null when no attempts in window (never 0-imputed). | n_answered / n_attempts over the last 14d. |
+| `n_immediate_hangup_14d` | telephony | Int64 | dial_attempt | 14d | 0 when no attempts in window. | Attempts with network_response=immediate_hangup in 14d. |
+| `hangup_rate_14d` | telephony | Float64 | dial_attempt | 14d | null when no attempts in window. | n_immediate_hangup / n_attempts over 14d. |
+| `n_switched_off_14d` | telephony | Int64 | dial_attempt | 14d | 0 when no attempts in window. | Attempts with network_response=switched_off in the last 14d. |
+| `n_not_reachable_14d` | telephony | Int64 | dial_attempt | 14d | 0 when no attempts in window. | Attempts with network_response=not_reachable in the last 14d. |
+| `n_does_not_exist_14d` | telephony | Int64 | dial_attempt | 14d | 0 when no attempts in window. | Attempts with network_response=does_not_exist in the last 14d. |
+| `n_no_answer_14d` | telephony | Int64 | dial_attempt | 14d | 0 when no attempts in window. | Attempts with network_response=no_answer in the last 14d. |
+| `n_busy_14d` | telephony | Int64 | dial_attempt | 14d | 0 when no attempts in window. | Attempts with network_response=busy in the last 14d. |
+| `n_attempts_morning_14d` | telephony | Int64 | dial_attempt | 14d | 0 when no attempts in window. | Attempts placed in the morning slot (IST) in 14d. |
+| `n_attempts_afternoon_14d` | telephony | Int64 | dial_attempt | 14d | 0 when no attempts in window. | Attempts placed in the afternoon slot (IST) in 14d. |
+| `n_attempts_evening_14d` | telephony | Int64 | dial_attempt | 14d | 0 when no attempts in window. | Attempts placed in the evening slot (IST) in 14d. |
+| `answer_rate_morning_14d` | telephony | Float64 | dial_attempt | 14d | null when no attempts in that slot and window. | Answered share within the morning slot (IST) over 14d. |
+| `answer_rate_afternoon_14d` | telephony | Float64 | dial_attempt | 14d | null when no attempts in that slot and window. | Answered share within the afternoon slot (IST) over 14d. |
+| `answer_rate_evening_14d` | telephony | Float64 | dial_attempt | 14d | null when no attempts in that slot and window. | Answered share within the evening slot (IST) over 14d. |
+| `weekend_attempt_share_14d` | telephony | Float64 | dial_attempt | 14d | null when no attempts in window. | Share of attempts on Sat/Sun (IST) over 14d. |
+| `ring_seconds_mean_14d` | telephony | Float64 | dial_attempt | 14d | null when no attempts in window. | Mean ring_seconds over 14d. |
+| `ring_seconds_std_14d` | telephony | Float64 | dial_attempt | 14d | null with fewer than 2 attempts in window. | Sample std of ring_seconds over 14d. |
+| `short_ring_rate_14d` | telephony | Float64 | dial_attempt | 14d | null when no attempts in window. | Share of attempts with ring_seconds below configs short_ring_seconds. |
+| `n_attempts_30d` | telephony | Int64 | dial_attempt | 30d | 0 when no attempts in window. | Dial attempts with occurred_at in the last 30d. |
+| `n_answered_30d` | telephony | Int64 | dial_attempt | 30d | 0 when no attempts in window. | Attempts with network_response=answered in the last 30d. |
+| `answer_rate_30d` | telephony | Float64 | dial_attempt | 30d | null when no attempts in window (never 0-imputed). | n_answered / n_attempts over the last 30d. |
+| `n_immediate_hangup_30d` | telephony | Int64 | dial_attempt | 30d | 0 when no attempts in window. | Attempts with network_response=immediate_hangup in 30d. |
+| `hangup_rate_30d` | telephony | Float64 | dial_attempt | 30d | null when no attempts in window. | n_immediate_hangup / n_attempts over 30d. |
+| `n_switched_off_30d` | telephony | Int64 | dial_attempt | 30d | 0 when no attempts in window. | Attempts with network_response=switched_off in the last 30d. |
+| `n_not_reachable_30d` | telephony | Int64 | dial_attempt | 30d | 0 when no attempts in window. | Attempts with network_response=not_reachable in the last 30d. |
+| `n_does_not_exist_30d` | telephony | Int64 | dial_attempt | 30d | 0 when no attempts in window. | Attempts with network_response=does_not_exist in the last 30d. |
+| `n_no_answer_30d` | telephony | Int64 | dial_attempt | 30d | 0 when no attempts in window. | Attempts with network_response=no_answer in the last 30d. |
+| `n_busy_30d` | telephony | Int64 | dial_attempt | 30d | 0 when no attempts in window. | Attempts with network_response=busy in the last 30d. |
+| `n_attempts_morning_30d` | telephony | Int64 | dial_attempt | 30d | 0 when no attempts in window. | Attempts placed in the morning slot (IST) in 30d. |
+| `n_attempts_afternoon_30d` | telephony | Int64 | dial_attempt | 30d | 0 when no attempts in window. | Attempts placed in the afternoon slot (IST) in 30d. |
+| `n_attempts_evening_30d` | telephony | Int64 | dial_attempt | 30d | 0 when no attempts in window. | Attempts placed in the evening slot (IST) in 30d. |
+| `answer_rate_morning_30d` | telephony | Float64 | dial_attempt | 30d | null when no attempts in that slot and window. | Answered share within the morning slot (IST) over 30d. |
+| `answer_rate_afternoon_30d` | telephony | Float64 | dial_attempt | 30d | null when no attempts in that slot and window. | Answered share within the afternoon slot (IST) over 30d. |
+| `answer_rate_evening_30d` | telephony | Float64 | dial_attempt | 30d | null when no attempts in that slot and window. | Answered share within the evening slot (IST) over 30d. |
+| `weekend_attempt_share_30d` | telephony | Float64 | dial_attempt | 30d | null when no attempts in window. | Share of attempts on Sat/Sun (IST) over 30d. |
+| `ring_seconds_mean_30d` | telephony | Float64 | dial_attempt | 30d | null when no attempts in window. | Mean ring_seconds over 30d. |
+| `ring_seconds_std_30d` | telephony | Float64 | dial_attempt | 30d | null with fewer than 2 attempts in window. | Sample std of ring_seconds over 30d. |
+| `short_ring_rate_30d` | telephony | Float64 | dial_attempt | 30d | null when no attempts in window. | Share of attempts with ring_seconds below configs short_ring_seconds. |
+| `last_response_type` | telephony | string | dial_attempt | - | null when never attempted. | Most recent network_response (by occurred_at). |
+| `consecutive_failures` | telephony | Int64 | dial_attempt | - | null when never attempted; 0 when the last attempt was answered. | Trailing run of non-answered responses since the last answer. |
+| `consecutive_same_response` | telephony | Int64 | dial_attempt | - | null when never attempted. | Trailing run length of the latest network_response value. |
+| `days_since_first_attempt` | telephony | Int64 | dial_attempt | - | null when never attempted. | Days from first visible attempt to as_of (date-based, UTC). |
+| `days_since_last_attempt` | telephony | Int64 | dial_attempt | - | null when never attempted. | Days from last visible attempt to as_of. |
+| `days_since_last_answer` | telephony | Int64 | dial_attempt | - | null when never answered. | Days from last answered attempt to as_of. |
+| `days_since_last_rpc` | telephony | Int64 | disposition | - | null when no RPC disposition is visible. | Days from last RPC disposition to as_of. |
+| `mean_gap_between_attempts_days` | telephony | Float64 | dial_attempt | - | null with fewer than 2 attempts. | Mean gap in days between consecutive visible attempts. |
+| `system_fail_rate_on_last_attempt_day` | telephony | Float64 | dial_attempt | - | null when never attempted. | Portfolio-wide failure share on the IST date of this contact point's last attempt, so models can discount dialer outages. |
+| `n_rpc` | disposition | Int64 | disposition | - | 0 when no visible dispositions. | Visible dispositions with value rpc (all-time). |
+| `n_wrong_number` | disposition | Int64 | disposition | - | 0 when no visible dispositions. | Visible dispositions with value wrong_number (all-time). |
+| `n_third_party` | disposition | Int64 | disposition | - | 0 when no visible dispositions. | Visible dispositions with value third_party (all-time). |
+| `n_dispute` | disposition | Int64 | disposition | - | 0 when no visible dispositions. | Visible dispositions with value dispute (all-time). |
+| `n_promise_to_pay` | disposition | Int64 | disposition | - | 0 when no visible dispositions. | Visible dispositions with value promise_to_pay (all-time). |
+| `wrong_number_rate` | disposition | Float64 | disposition | - | null when no visible dispositions. | n_wrong_number / all visible dispositions. |
+| `last_disposition` | disposition | string | disposition | - | null when no visible dispositions. | Most recent disposition value (by occurred_at). |
+| `days_since_last_disposition` | disposition | Int64 | disposition | - | null when no visible dispositions. | Days from last visible disposition to as_of. |
+| `remark_switchedoff_cue_count` | text | Int64 | disposition | - | 0 when no remarks mention it (never null when dispositions exist; 0 also when no dispositions). | Remarks matching switched-off phrasing (Hinglish patterns). |
+| `remark_wrongnumber_cue_count` | text | Int64 | disposition | - | 0 when no match. | Remarks matching wrong-number phrasing. |
+| `remark_thirdparty_cue_count` | text | Int64 | disposition | - | 0 when no match. | Remarks matching third-party-answer phrasing. |
+| `remark_avoidance_cue_count` | text | Int64 | disposition | - | 0 when no match. | Remarks matching observable avoidance phrasing. |
+| `switched_off_months_max` | text | Int64 | disposition | - | null when no duration phrase is found. | Max months extracted from phrases like 'number band hai 2 mahine se'. |
+| `n_bot_calls` | bot | Int64 | bot_transcript | - | 0 when no visible transcripts. | Visible voice-bot transcripts (all-time). |
+| `n_bot_who_borrower` | bot | Int64 | bot_transcript | - | 0 when no visible transcripts. | Transcripts where who_answered=borrower (payload key when present, else derived: third-party/name cue -> other, else unknown). |
+| `n_bot_who_other` | bot | Int64 | bot_transcript | - | 0 when no visible transcripts. | Transcripts where who_answered=other (payload key when present, else derived: third-party/name cue -> other, else unknown). |
+| `n_bot_who_unknown` | bot | Int64 | bot_transcript | - | 0 when no visible transcripts. | Transcripts where who_answered=unknown (payload key when present, else derived: third-party/name cue -> other, else unknown). |
+| `n_bot_whoisthis_cue` | bot | Int64 | bot_transcript | - | 0 when no match. | Transcripts matching 'who is this' phrasing. |
+| `n_bot_name_mismatch` | bot | Int64 | bot_transcript | - | 0 when no match. | Transcripts matching name-mismatch phrasing. |
+| `n_bot_language_mismatch` | bot | Int64 | bot_transcript | - | 0 when no match. | Transcripts matching language-barrier phrasing. |
+| `last_who_answered` | bot | string | bot_transcript | - | null when no visible transcripts. | who_answered of the most recent transcript. |
+| `n_borrowers_sharing_cp` | shared | Int64 | contact_point_update | - | Always >= 1 for rows in the universe. | Distinct borrowers sharing this contact_point_ref within the same lender. |
+| `n_accounts_sharing_cp` | shared | Int64 | contact_point_update | - | Always >= 1. | Distinct accounts sharing this ref within the lender. |
+| `is_shared` | shared | boolean | contact_point_update | - | Never null. | True when >1 borrower shares this ref within the lender. |
+| `n_phone_cps_for_borrower` | shared | Int64 | contact_point_update | - | Always >= 1 for phone rows. | Phone contact points of this borrower known at as_of. |
+| `cp_rank_within_borrower` | shared | Int64 | contact_point_update | - | 1-based; never null. | Rank of this contact point within the borrower by earliest-known time (ties broken by ref). |
+| `is_primary` | shared | boolean | contact_point_update | - | Never null. | Latest contact_point_update is_primary when visible, else the contact_points table flag. |
+| `connected_component_size` | shared | Int64 | contact_point_update | - | Always >= 1. | Size of the borrower's lender-local sharing component (borrowers linked by shared contact points). |
+| `source` | record | string | contact_point_update | - | Never null; 'unknown' when neither table nor update gives one. | Latest update source when visible, else the contact_points table value. |
+| `record_age_days` | record | Int64 | contact_point_update | - | Never null (falls back to first-seen time). | Days from contact-point creation (or first-seen) to as_of. |
+| `days_since_last_update` | record | Int64 | contact_point_update | - | null when no update event is visible. | Days from last contact_point_update to as_of. |
+| `n_updates` | record | Int64 | contact_point_update | - | 0 when no update event is visible. | Visible contact_point_update events (all-time). |
+| `confirmed_by_payment` | record | boolean | payment, dial_attempt, disposition | - | False when there is no confirming evidence (never null). | True when a visible payment occurred within payment_confirmation_days after an answered call or RPC on this contact point. |
+| `days_since_confirmed` | record | Int64 | payment | - | null when never confirmed. | Days from the latest confirming payment to as_of. |
+| `other_lines_attempts_1d` | crossline | Int64 | dial_attempt | 1d | 0 when the borrower has no other phone lines with attempts. | Attempts on the borrower's OTHER phone contact points in 1d. |
+| `other_lines_answered_1d` | crossline | Int64 | dial_attempt | 1d | 0 when none. | Answered attempts on the borrower's other phone lines in 1d. |
+| `other_lines_answer_rate_1d` | crossline | Float64 | dial_attempt | 1d | null when other lines have no attempts in window. | Answer rate on the borrower's other phone lines over 1d. |
+| `n_payments_1d` | crossline | Int64 | payment | 1d | 0 when no visible payments in window. | Borrower-level visible payments with occurred_at in 1d. |
+| `other_lines_attempts_3d` | crossline | Int64 | dial_attempt | 3d | 0 when the borrower has no other phone lines with attempts. | Attempts on the borrower's OTHER phone contact points in 3d. |
+| `other_lines_answered_3d` | crossline | Int64 | dial_attempt | 3d | 0 when none. | Answered attempts on the borrower's other phone lines in 3d. |
+| `other_lines_answer_rate_3d` | crossline | Float64 | dial_attempt | 3d | null when other lines have no attempts in window. | Answer rate on the borrower's other phone lines over 3d. |
+| `n_payments_3d` | crossline | Int64 | payment | 3d | 0 when no visible payments in window. | Borrower-level visible payments with occurred_at in 3d. |
+| `other_lines_attempts_7d` | crossline | Int64 | dial_attempt | 7d | 0 when the borrower has no other phone lines with attempts. | Attempts on the borrower's OTHER phone contact points in 7d. |
+| `other_lines_answered_7d` | crossline | Int64 | dial_attempt | 7d | 0 when none. | Answered attempts on the borrower's other phone lines in 7d. |
+| `other_lines_answer_rate_7d` | crossline | Float64 | dial_attempt | 7d | null when other lines have no attempts in window. | Answer rate on the borrower's other phone lines over 7d. |
+| `n_payments_7d` | crossline | Int64 | payment | 7d | 0 when no visible payments in window. | Borrower-level visible payments with occurred_at in 7d. |
+| `other_lines_attempts_14d` | crossline | Int64 | dial_attempt | 14d | 0 when the borrower has no other phone lines with attempts. | Attempts on the borrower's OTHER phone contact points in 14d. |
+| `other_lines_answered_14d` | crossline | Int64 | dial_attempt | 14d | 0 when none. | Answered attempts on the borrower's other phone lines in 14d. |
+| `other_lines_answer_rate_14d` | crossline | Float64 | dial_attempt | 14d | null when other lines have no attempts in window. | Answer rate on the borrower's other phone lines over 14d. |
+| `n_payments_14d` | crossline | Int64 | payment | 14d | 0 when no visible payments in window. | Borrower-level visible payments with occurred_at in 14d. |
+| `other_lines_attempts_30d` | crossline | Int64 | dial_attempt | 30d | 0 when the borrower has no other phone lines with attempts. | Attempts on the borrower's OTHER phone contact points in 30d. |
+| `other_lines_answered_30d` | crossline | Int64 | dial_attempt | 30d | 0 when none. | Answered attempts on the borrower's other phone lines in 30d. |
+| `other_lines_answer_rate_30d` | crossline | Float64 | dial_attempt | 30d | null when other lines have no attempts in window. | Answer rate on the borrower's other phone lines over 30d. |
+| `n_payments_30d` | crossline | Int64 | payment | 30d | 0 when no visible payments in window. | Borrower-level visible payments with occurred_at in 30d. |
+| `days_since_last_payment` | crossline | Int64 | payment | - | null when no visible payment. | Days from last visible borrower payment to as_of. |
+| `days_since_last_other_line_answer` | crossline | Int64 | dial_attempt | - | null when no other line was ever answered. | Days from the last answered attempt on any OTHER phone line to as_of. |
+| `n_visits_locked_premises` | field | Int64 | field_visit | - | null for phone contact points; 0 for addresses with no such outcome. | Visible field visits with outcome=locked_premises. |
+| `n_visits_nobody_of_that_name` | field | Int64 | field_visit | - | null for phone contact points; 0 for addresses with no such outcome. | Visible field visits with outcome=nobody_of_that_name. |
+| `n_visits_met_borrower` | field | Int64 | field_visit | - | null for phone contact points; 0 for addresses with no such outcome. | Visible field visits with outcome=met_borrower. |
+| `n_visits` | field | Int64 | field_visit | - | null for phone contact points. | Visible field visits (all-time). |
+| `last_visit_outcome` | field | string | field_visit | - | null for phones or when never visited. | Most recent visit outcome (by occurred_at). |
+| `days_since_last_visit` | field | Int64 | field_visit | - | null for phones or when never visited. | Days from last visible visit to as_of. |
+| `gps_dwell_mean_seconds` | field | Float64 | field_visit | - | null for phones or when no dwell recorded. | Mean dwell_seconds across visible visits. |
+| `visit_hour_mean` | field | Float64 | field_visit | - | null for phones or when never visited. | Mean visit hour in IST (circular mean is NOT used; plain mean, documented as approximate). |
+| `dpd_bucket` | account | string | tables/calendar | - | Never null when the borrower row exists. | DPD bucket from the borrowers table. |
+| `outstanding` | account | Float64 | tables/calendar | - | Never null when the borrower row exists. | Outstanding amount from the borrowers table (simulation-only). |
+| `product` | account | string | tables/calendar | - | Never null when the borrower row exists. | Product segment from the borrowers table. |
+| `secured_flag` | account | boolean | tables/calendar | - | Never null when the borrower row exists. | Whether the product is secured (from the borrowers table). |
+| `has_any_attempt` | core | boolean | dial_attempt | - | Never null. | True when any dial attempt is visible for this contact point. Distinguishes 'no evidence' from measured zeros. |
+| `contact_point_type` | core | string | contact_point_update | - | Never null. | phone or address for this contact point. |
+| `asof_weekday` | calendar | Int64 | tables/calendar | - | Never null. | as_of weekday in IST (Monday=0). |
+| `asof_day_of_month` | calendar | Int64 | tables/calendar | - | Never null. | as_of day of month in IST. |
+| `is_holiday` | calendar | boolean | tables/calendar | - | Never null. | True when the as_of IST date is in configs holidays. |
+| `agent_wrong_number_rate` | agent | Float64 | disposition | - | null when the last disposition has no agent or the agent has no history. | Wrong-number share of the agent who recorded the latest disposition (feature of disposition reliability; only present when agent_id is observed). |
+<!-- REGISTRY:END -->

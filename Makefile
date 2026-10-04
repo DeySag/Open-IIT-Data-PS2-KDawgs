@@ -1,7 +1,7 @@
 # Makefile for PS2 RPC
 # Deterministic commands for data, train, eval, test
 
-.PHONY: help install data-dev data-full train-baselines train-models eval smoke lint typecheck test clean
+.PHONY: help install data-dev data-full features-dev train-baselines train-models eval smoke lint typecheck test clean
 
 help:
 	@echo "PS2 RPC - Available commands:"
@@ -25,6 +25,9 @@ data-dev:
 
 data-full:
 	python -m src.rpc.sim.generate --config configs/sim.yaml --scale full --output data/full.parquet
+
+features-dev:
+	python -m src.rpc.features.build --scale dev --out data/features_dev.parquet
 
 train-baselines:
 	python -m src.rpc.models.train_baselines --data data/dev.parquet --output models/baselines/
