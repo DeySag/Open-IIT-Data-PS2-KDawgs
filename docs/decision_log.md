@@ -18,3 +18,7 @@
 
 ## 2026-10-04 — eval: pre-existing pyproject.toml breaks bare pytest collection
 - Reason: toml parse error at line 36 (unrelated to eval). Tests verified with `python -m pytest -c NUL -p no:cacheprovider`. Flagged to coordinator; not patched (outside ownership).
+
+## 2026-10-04 — eval: root .gitignore `eval/` + `models/` also ignore src/rpc/eval and src/rpc/models
+- Reason: patterns meant for top-level artifact dirs match our source dirs. Did NOT edit .gitignore (outside ownership); staged owned files with `git add -f`. Coordinator should scope those patterns (e.g. `/eval/` `/models/`).
+- Alternatives: leave files uncommitted (rejected: deliverable must be in git).
