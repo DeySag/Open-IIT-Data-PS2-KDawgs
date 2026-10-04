@@ -1,0 +1,183 @@
+# State-tracker configuration (model priors + hyper-parameters).
+#
+# IMPORTANT - NO LEAKAGE: every number below is a coarse, qualitative prior
+# chosen from domain reasoning (see docs/state_tracker.md justification table),
+# NOT copied from configs/sim.yaml. sim.yaml holds simulator truth used only to
+# generate synthetic data; copying its numbers into model priors would be
+# leakage and would overstate real-world performance. Strengths below are
+# deliberately weak (Dirichlet pseudo-counts) so data dominates quickly.
+#
+# All probabilities are simulation-only assumptions for CN/SMEs to confirm.
+
+model_version: "state_tracker_v0.1.0"
+
+# Line-level hidden states (internal): valid, temp_unreachable,
+# switched_off_long, recycled, third_party, invalid.
+line_states: [valid, temp_unreachable, switched_off_long, recycled, third_party, invalid]
+
+# Borrower-level avoidance latent A_t in {0, 1}.
+use_borrower_latent: true
+
+# Initial line-state distribution (coarse prior: most numbers believed live at
+# first sight; a visible minority dead on arrival).
+initial_line_dist:
+  valid: 0.60
+  temp_unreachable: 0.10
+  switched_off_long: 0.08
+  recycled: 0.05
+  third_party: 0.07
+  invalid: 0.10
+
+# Initial avoidance probability (borrower starts avoiding with prob p).
+initial_avoid_prob: 0.20
+
+# Daily line-state transition matrix (rows sum to 1). Qualitative shape only:
+# strong self-persistence; invalid absorbing; recycled near-absorbing with a
+# small leak to invalid (re-classification); dormancy precedes recycling
+# (switched_off_long -> recycled allowed, recycled -> live forbidden).
+transition_line:
+  valid:               {valid: 0.92, temp_unreachable: 0.04, switched_off_long: 0.02, recycled: 0.005, third_party: 0.005, invalid: 0.01}
+  temp_unreachable:    {valid: 0.30, temp_unreachable: 0.55, switched_off_long: 0.10, recycled: 0.01, third_party: 0.02, invalid: 0.02}
+  switched_off_long:   {valid: 0.10, temp_unreachable: 0.10, switched_off_long: 0.65, recycled: 0.06, third_party: 0.02, invalid: 0.07}
+  recycled:            {valid: 0.00, temp_unreachable: 0.00, switched_off_long: 0.00, recycled: 0.93, third_party: 0.00, invalid: 0.07}
+  third_party:         {valid: 0.05, temp_unreachable: 0.05, switched_off_long: 0.02, recycled: 0.00, third_party: 0.80, invalid: 0.08}
+  invalid:             {valid: 0.00, temp_unreachable: 0.00, switched_off_long: 0.00, recycled: 0.00, third_party: 0.00, invalid: 1.00}
+
+# Daily avoidance transition P(A_t | A_{t-1}): episodes persist for weeks.
+transition_avoid:
+  [[0.97, 0.03],
+   [0.05, 0.95]]
+
+# Optional DPD dependence of avoidance entry: P(A 0->1) scaled per bucket.
+# Coarse monotone assumption (higher DPD -> more avoidance), weak magnitude.
+avoid_entry_multiplier_by_dpd:
+  X: 0.5
+  "1-30": 0.8
+  "31-60": 1.0
+  "61-90": 1.3
+  "90+": 1.6
+
+# Network-response emission P(response | line_state, A). Coarse shape only:
+# - does_not_exist lives almost entirely on recycled/invalid;
+# - repeated switched_off points at switched_off_long;
+# - answered is common when (valid, calm), rare when avoiding;
+# - immediate_hangup/no_answer inflate when (valid, avoiding).
+emission_network:
+  valid:
+    calm:     {answered: 0.40, no_answer: 0.40, busy: 0.06, switched_off: 0.05, not_reachable: 0.05, does_not_exist: 0.005, immediate_hangup: 0.035}
+    avoiding: {answered: 0.03, no_answer: 0.55, busy: 0.05, switched_off: 0.15, not_reachable: 0.10, does_not_exist: 0.005, immediate_hangup: 0.115}
+  temp_unreachable:
+    calm:     {answered: 0.12, no_answer: 0.30, busy: 0.10, switched_off: 0.25, not_reachable: 0.18, does_not_exist: 0.005, immediate_hangup: 0.045}
+    avoiding: {answered: 0.03, no_answer: 0.40, busy: 0.07, switched_off: 0.25, not_reachable: 0.18, does_not_exist: 0.005, immediate_hangup: 0.065}
+  switched_off_long:
+    calm:     {answered: 0.02, no_answer: 0.10, busy: 0.03, switched_off: 0.55, not_reachable: 0.20, does_not_exist: 0.05, immediate_hangup: 0.05}
+    avoiding: {answered: 0.01, no_answer: 0.10, busy: 0.03, switched_off: 0.56, not_reachable: 0.20, does_not_exist: 0.05, immediate_hangup: 0.05}
+  recycled:
+    calm:     {answered: 0.06, no_answer: 0.20, busy: 0.05, switched_off: 0.10, not_reachable: 0.14, does_not_exist: 0.40, immediate_hangup: 0.05}
+    avoiding: {answered: 0.06, no_answer: 0.20, busy: 0.05, switched_off: 0.10, not_reachable: 0.14, does_not_exist: 0.40, immediate_hangup: 0.05}
+  third_party:
+    calm:     {answered: 0.45, no_answer: 0.28, busy: 0.06, switched_off: 0.08, not_reachable: 0.08, does_not_exist: 0.005, immediate_hangup: 0.045}
+    avoiding: {answered: 0.30, no_answer: 0.35, busy: 0.06, switched_off: 0.10, not_reachable: 0.10, does_not_exist: 0.005, immediate_hangup: 0.085}
+  invalid:
+    calm:     {answered: 0.005, no_answer: 0.10, busy: 0.02, switched_off: 0.06, not_reachable: 0.12, does_not_exist: 0.65, immediate_hangup: 0.045}
+    avoiding: {answered: 0.005, no_answer: 0.10, busy: 0.02, switched_off: 0.06, not_reachable: 0.12, does_not_exist: 0.65, immediate_hangup: 0.045}
+
+# Disposition emission P(disposition | line_state, A), applied when a call is
+# answered (or a standalone disposition event arrives). Coarse shape:
+# wrong_number concentrates on recycled/invalid; third_party disposition on
+# third_party state; rpc/promise_to_pay on (valid, calm).
+emission_disposition:
+  valid:
+    calm:     {rpc: 0.55, wrong_number: 0.02, third_party: 0.05, switched_off: 0.05, not_reachable: 0.05, promise_to_pay: 0.12, dispute: 0.03, callback: 0.13}
+    avoiding: {rpc: 0.06, wrong_number: 0.03, third_party: 0.12, switched_off: 0.25, not_reachable: 0.25, promise_to_pay: 0.03, dispute: 0.06, callback: 0.20}
+  temp_unreachable:
+    calm:     {rpc: 0.20, wrong_number: 0.03, third_party: 0.06, switched_off: 0.20, not_reachable: 0.20, promise_to_pay: 0.06, dispute: 0.03, callback: 0.22}
+    avoiding: {rpc: 0.06, wrong_number: 0.03, third_party: 0.12, switched_off: 0.25, not_reachable: 0.25, promise_to_pay: 0.03, dispute: 0.06, callback: 0.20}
+  switched_off_long:
+    calm:     {rpc: 0.03, wrong_number: 0.04, third_party: 0.06, switched_off: 0.40, not_reachable: 0.28, promise_to_pay: 0.02, dispute: 0.02, callback: 0.15}
+    avoiding: {rpc: 0.03, wrong_number: 0.04, third_party: 0.06, switched_off: 0.40, not_reachable: 0.28, promise_to_pay: 0.02, dispute: 0.02, callback: 0.15}
+  recycled:
+    calm:     {rpc: 0.01, wrong_number: 0.55, third_party: 0.12, switched_off: 0.05, not_reachable: 0.10, promise_to_pay: 0.005, dispute: 0.015, callback: 0.15}
+    avoiding: {rpc: 0.01, wrong_number: 0.55, third_party: 0.12, switched_off: 0.05, not_reachable: 0.10, promise_to_pay: 0.005, dispute: 0.015, callback: 0.15}
+  third_party:
+    calm:     {rpc: 0.08, wrong_number: 0.05, third_party: 0.60, switched_off: 0.04, not_reachable: 0.05, promise_to_pay: 0.02, dispute: 0.03, callback: 0.13}
+    avoiding: {rpc: 0.08, wrong_number: 0.05, third_party: 0.60, switched_off: 0.04, not_reachable: 0.05, promise_to_pay: 0.02, dispute: 0.03, callback: 0.13}
+  invalid:
+    calm:     {rpc: 0.005, wrong_number: 0.45, third_party: 0.05, switched_off: 0.05, not_reachable: 0.15, promise_to_pay: 0.005, dispute: 0.01, callback: 0.28}
+    avoiding: {rpc: 0.005, wrong_number: 0.45, third_party: 0.05, switched_off: 0.05, not_reachable: 0.15, promise_to_pay: 0.005, dispute: 0.01, callback: 0.28}
+
+# Borrower-level payment evidence: a payment is strong evidence of A=0/alive.
+# Per-payment-event likelihoods (not daily rates).
+payment_emission:
+  a0: 0.030
+  a1: 0.001
+
+# Bot-transcript cue weights: per-event likelihood ratio bumps applied when a
+# transcript contains the cue phrases (v0 keyword hook, features not decisions).
+transcript_cues:
+  avoid_phrases: ["nahi dena", "phone mat karo", "call mat karo", "avoid", "dhamki", "complaint karunga"]
+  avoid_odds_ratio: 3.0
+  wrong_number_phrases: ["wrong number", "galat number", "yeh number mera", "not my number"]
+  wrong_number_dead_shift: 0.30
+
+# Hard-evidence overrides: applied BEFORE the probabilistic update at the
+# event step (documented rules, not learned).
+overrides:
+  # On does_not_exist: move fraction `mass_shift` of live-state mass
+  # (valid/temp/switched_off_long/third_party) to dead states, split
+  # `to_invalid` vs recycled.
+  does_not_exist: {mass_shift: 0.55, to_invalid: 0.60}
+  # On explicit wrong_number disposition: same mechanism, weaker (agent noise).
+  wrong_number: {mass_shift: 0.45, to_invalid: 0.45}
+  # On answered call with rpc/promise_to_pay/callback on THIS line: collapse
+  # line mass to valid and push borrower A toward 0 with strength
+  # `avoid_reset` (fraction of A=1 mass moved to A=0 across sibling lines).
+  rpc_answer: {avoid_reset: 0.90}
+  # A payment resets avoidance similarly.
+  payment: {avoid_reset: 0.95}
+
+# Asymmetric-silence (explained-away) shift. The filter's network emission is
+# unconditional, so it cannot express this: when the borrower is demonstrably
+# active elsewhere (rpc answer, payment, or an answered call on any line) on a
+# day line k is dialled but never answered, suspicion moves to line k. For
+# each such silent-on-active-day dial weight w (strong activity 1.0, weak
+# answered-only 0.5), move fraction sigma = 1 - exp(-W / kappa) of the line's
+# valid mass (both A slices) to dead states, split pro-rata to the current
+# dead distribution with a floor from the initial prior. Days with no events
+# anywhere never trigger this (no evidence is not negative evidence).
+silence_shift_kappa: 3.0
+silence_strong_weight: 1.0
+silence_weak_weight: 0.5
+
+# p_rpc head: P(next dial answered by borrower at a typical slot).
+answer_given_valid_calm: 0.35
+# Hook for the slot model (slot_gbm workstream): multiplied later per slot.
+slot_multiplier_default: 1.0
+
+# Confidence: (1 - H/Hmax) * exp(-days_since_evidence / tau). No evidence is
+# not negative evidence: the posterior diffuses via transitions while
+# confidence falls.
+confidence_tau_days: 30.0
+
+# EM fitting (Baum-Welch on events only, no ground-truth labels).
+em:
+  n_iter: 12
+  tol: 1.0e-4
+  # Dirichlet pseudo-counts (weak priors so data dominates).
+  prior_strength_transition: 20.0
+  prior_strength_emission: 10.0
+  prior_strength_initial: 5.0
+  # Minimum emission floor keeps every symbol reachable (numerical safety).
+  emission_floor: 1.0e-4
+  # Cap fitting cost on large data; borrowers sub-sampled with seed.
+  max_fit_borrowers: 5000
+  fit_seed: 7
+
+# Source covariate: per-source multiplier on the initial dead mass
+# (bureau/skip_trace records start more suspect; borrower_on_call confirmed).
+source_initial_dead_multiplier:
+  KYC: 1.0
+  later_update: 0.9
+  bureau: 1.4
+  borrower_on_call: 0.4
+  skip_trace: 1.2
