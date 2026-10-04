@@ -1,77 +1,117 @@
 # Cost Configuration (INR)
-# All costs are assumptions for CN/SMEs to confirm
+# EVERY number in this file is an ASSUMPTION for CN/SMEs to confirm (simulation-only).
+# Do not present derived figures as business impact.
 
 costs:
-  # Channel costs per attempt/connect
+  # Channel costs per attempt/connect (ASSUMED; problem-statement ranges:
+  # SMS/WhatsApp a fraction of a rupee, bot Rs 1-3, tele-caller Rs 15-30,
+  # field visit Rs 150-400 per productive visit)
   channels:
     sms:
-      cost_per_attempt: 0.05
-      cost_per_delivered: 0.10
+      cost_per_attempt: 0.05  # ASSUMPTION
+      cost_per_delivered: 0.10  # ASSUMPTION
     whatsapp:
-      cost_per_attempt: 0.10
-      cost_per_delivered: 0.20
-      cost_per_read: 0.50
+      cost_per_attempt: 0.10  # ASSUMPTION
+      cost_per_delivered: 0.20  # ASSUMPTION
+      cost_per_read: 0.50  # ASSUMPTION
     voice_bot:
-      cost_per_call: 2.0
-      cost_per_connect: 3.0
-      cost_per_minute: 1.0
+      cost_per_call: 2.0  # ASSUMPTION
+      cost_per_connect: 3.0  # ASSUMPTION
+      cost_per_minute: 1.0  # ASSUMPTION
     telecaller:
-      cost_per_attempt: 10.0
-      cost_per_connect: 25.0
-      cost_per_minute: 5.0
+      cost_per_attempt: 10.0  # ASSUMPTION
+      cost_per_connect: 25.0  # ASSUMPTION
+      cost_per_minute: 5.0  # ASSUMPTION
     field_visit:
-      cost_per_visit: 250.0
-      cost_per_productive_visit: 400.0
+      cost_per_visit: 250.0  # ASSUMPTION
+      cost_per_productive_visit: 400.0  # ASSUMPTION
 
-  # Skip trace costs
+  # Skip trace costs (ASSUMED per-method parameters)
   skip_trace:
     digital:
-      cost_per_trace: 100.0
-      success_rate: 0.25
+      cost_per_trace: 100.0  # ASSUMPTION
+      success_rate: 0.25  # ASSUMPTION: P(find valid contact | trace, contact dead)
     physical:
-      cost_per_trace: 500.0
-      success_rate: 0.40
+      cost_per_trace: 500.0  # ASSUMPTION
+      success_rate: 0.40  # ASSUMPTION
     bureau:
-      cost_per_trace: 50.0
-      success_rate: 0.15
+      cost_per_trace: 50.0  # ASSUMPTION
+      success_rate: 0.15  # ASSUMPTION
 
-  # Collection costs (post-contact)
+  # Collection costs (post-contact) (ASSUMED)
   collection:
-    telecaller_per_minute: 5.0
-    field_per_visit: 300.0
-    legal_notice: 2000.0
-    legal_proceedings: 50000.0
+    telecaller_per_minute: 5.0  # ASSUMPTION
+    field_per_visit: 300.0  # ASSUMPTION
+    legal_notice: 2000.0  # ASSUMPTION
+    legal_proceedings: 50000.0  # ASSUMPTION
 
-  # Compliance and goodwill costs (estimated)
+  # Compliance and goodwill costs (ASSUMED estimates)
   compliance:
-    recycled_disclosure_penalty: 100000.0  # per incident
-    third_party_disclosure_penalty: 50000.0
-    dnd_violation_penalty: 10000.0
-    contact_hours_violation: 5000.0
-    customer_goodwill_loss_per_incident: 1000.0
+    recycled_disclosure_penalty: 100000.0  # ASSUMPTION per incident
+    third_party_disclosure_penalty: 50000.0  # ASSUMPTION
+    dnd_violation_penalty: 10000.0  # ASSUMPTION
+    contact_hours_violation: 5000.0  # ASSUMPTION
+    customer_goodwill_loss_per_incident: 1000.0  # ASSUMPTION
 
-  # Recoverable amount calculation
+  # Recoverable amount calculation (ASSUMED)
   recoverable:
     # Multipliers by bucket (applied to outstanding)
     dpd_multipliers:
-      X: 1.0
-      "1-30": 0.95
-      "31-60": 0.85
-      "61-90": 0.70
-      "90+": 0.50
+      X: 1.0  # ASSUMPTION
+      "1-30": 0.95  # ASSUMPTION
+      "31-60": 0.85  # ASSUMPTION
+      "61-90": 0.70  # ASSUMPTION
+      "90+": 0.50  # ASSUMPTION
     # Secured vs unsecured
-    secured_multiplier: 1.0
-    unsecured_multiplier: 0.60
-    # Discount rate (annual)
-    discount_rate: 0.12
-    # Penal charge restrictions (RBI)
-    max_penal_charge_rate: 0.24  # annualised
+    secured_multiplier: 1.0  # ASSUMPTION
+    unsecured_multiplier: 0.60  # ASSUMPTION
+    # Discount rate (annual) (ASSUMED)
+    discount_rate: 0.12  # ASSUMPTION
+    # Penal charge restrictions (RBI) (ASSUMED cap)
+    max_penal_charge_rate: 0.24  # ASSUMPTION, annualised
+
+  # Incremental recovery curves by DPD bucket and product (ASSUMED).
+  # gain = reached - not_reached, scaled by product_multiplier.
+  recovery_curves:
+    by_bucket:
+      X: { reached: 0.45, not_reached: 0.10 }  # ASSUMPTION
+      "1-30": { reached: 0.35, not_reached: 0.06 }  # ASSUMPTION
+      "31-60": { reached: 0.25, not_reached: 0.03 }  # ASSUMPTION
+      "61-90": { reached: 0.18, not_reached: 0.02 }  # ASSUMPTION
+      "90+": { reached: 0.12, not_reached: 0.01 }  # ASSUMPTION
+    product_multiplier:
+      secured_retail: 1.1  # ASSUMPTION
+      unsecured_retail: 1.0  # ASSUMPTION
+      msme: 0.9  # ASSUMPTION
+      microfinance: 0.8  # ASSUMPTION
+
+  # Settlement / present-value params (ASSUMED)
+  settlement:
+    haircut: 0.20  # ASSUMPTION: negotiated settlement discount
+    collection_lag_years: 0.5  # ASSUMPTION: mean time to collect post-contact
+
+  # Recycled-number cost ratio (ASSUMED). Suppression cutoff for the
+  # recycled-risk classifier: P* = 1 / (1 + ratio) ~= 0.0099. Missed-recycled
+  # errors are ~100x costlier than false suppressions, so suppression fires
+  # on even a weak credible signal. Kept in sync with
+  # guardrails.yaml decision.recycled_threshold.
+  recycled_threshold:
+    cost_ratio_miss_vs_false_suppress: 100.0  # ASSUMPTION
+
+  # Expected post-trace cost add-ons inside VOI (ASSUMED)
+  voi_costs:
+    expected_collection_cost: 60.0  # ASSUMPTION (INR per traced-then-reached account)
+    expected_goodwill_cost_per_trace: 25.0  # ASSUMPTION (INR)
+
+  # Deferral ("trace later") params (ASSUMED)
+  deferral:
+    deferral_days: 7  # ASSUMPTION
 
   # VOI calculation
   voi:
-    # Portfolio trace budget (daily)
-    daily_trace_budget: 100000.0
-    # Minimum VOI per rupee to queue
-    min_voi_per_rupee: 0.5
-    # Exploration budget fraction
-    exploration_fraction: 0.05
+    # Portfolio trace budget (daily) (ASSUMED)
+    daily_trace_budget: 100000.0  # ASSUMPTION
+    # Minimum VOI per rupee to queue (ASSUMED)
+    min_voi_per_rupee: 0.5  # ASSUMPTION
+    # Exploration budget fraction (ASSUMED)
+    exploration_fraction: 0.05  # ASSUMPTION

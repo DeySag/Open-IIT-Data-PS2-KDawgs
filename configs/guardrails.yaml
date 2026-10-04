@@ -83,5 +83,19 @@ guardrails:
       max_per_month: 1
       prior_notice_required: true
 
+  # Decision-layer knobs (thresholds, backoff, versioning).
+  # All values are assumptions for CN/SMEs to confirm (simulation-only).
+  decision:
+    model_version: "decision-v0.1.0"
+    validity_hours: 24  # ASSUMPTION: how long a decision stays valid
+    # Cost-ratio cutoff 1/(1+ratio) applies to the recycled-risk classifier
+    # score; ratio recorded in costs.yaml (recycled_threshold.cost_ratio...).
+    # This key is the resolved cutoff; keep in sync with costs.yaml.
+    recycled_threshold: 0.009900990099009901  # ASSUMPTION (= 1/101, ratio 100)
+    third_party_threshold: 0.5  # ASSUMPTION: third-party posterior mass to exclude
+    avoidance_threshold: 0.5  # ASSUMPTION: borrower-level avoidance to switch channel
+    temp_unreachable_backoff_days: 2  # ASSUMPTION
+    deferral_days: 7  # ASSUMPTION: "trace later" horizon
+
   # Per-lender overrides (merged with defaults)
   lender_overrides: {}
