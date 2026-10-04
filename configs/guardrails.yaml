@@ -1,0 +1,87 @@
+# Guardrails Configuration
+# Hard compliance rules evaluated FIRST in decision layer
+# Models can only narrow action set, never widen it
+
+guardrails:
+  # Contact hours (RBI Fair Practices Code)
+  contact_hours:
+    enabled: true
+    start_hour: 8   # 8 AM
+    end_hour: 19    # 7 PM
+    timezone: "Asia/Kolkata"
+    # Outside hours: only continue with backoff, no new channels
+
+  # Frequency caps
+  frequency_caps:
+    enabled: true
+    max_attempts_per_day: 3
+    max_attempts_per_week: 10
+    max_attempts_per_month: 30
+    # Exceeding caps: force continue with backoff or switch_channel
+
+  # DND registry
+  dnd:
+    enabled: true
+    respect_dnd: true
+    # DND numbers: suppress from voice/telecaller, allow SMS/WhatsApp only
+
+  # Consent
+  consent:
+    enabled: true
+    require_explicit_consent: true
+    # No consent: suppress all outbound
+
+  # Disputes
+  disputes:
+    enabled: true
+    on_dispute: "suppress_all"  # stop all contact until resolved
+
+  # Deceased / Insolvent
+  deceased_insolvent:
+    enabled: true
+    on_flag: "suppress_all"
+
+  # Suppression list (highest priority)
+  suppression:
+    enabled: true
+    immediate_add: true
+    removal_requires: "cn_signoff"
+    reasons:
+      - "recycled"
+      - "third_party"
+      - "deceased"
+      - "insolvent"
+      - "dispute"
+      - "dnd"
+      - "no_consent"
+
+  # Recycled number handling
+  recycled:
+    enabled: true
+    fast_path_minutes: 5
+    threshold_cost_ratio: 100  # missed-recycled cost / false-suppression cost
+    # If P(recycled) > threshold: immediate suppression
+
+  # Third-party disclosure prevention
+  third_party:
+    enabled: true
+    never_disclose_debt: true
+    restrict_to: "location_only"  # can only ask for borrower location
+
+  # Channel-specific rules
+  channel_rules:
+    sms_whatsapp:
+      max_per_day: 5
+      opt_out_respected: true
+    voice_bot:
+      max_per_day: 2
+      max_duration_seconds: 180
+    telecaller:
+      max_per_day: 1
+      script_compliance: true
+    field_visit:
+      max_per_month: 1
+      prior_notice_required: true
+
+  # Per-lender overrides (merged with defaults)
+  lender_overrides: {}
