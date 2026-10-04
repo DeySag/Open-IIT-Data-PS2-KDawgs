@@ -1,10 +1,5 @@
 # PS2 RPC: Right-Party Contact Prediction and Skip-Trace Prioritisation
 
-> **SIMULATION-ONLY.** There is no real CreditNirvana data and no usable public
-> dataset. Everything in this repo trains and validates on a synthetic
-> simulator. Every number derived from simulated data is labelled as such —
-> nothing here implies real-world lift. See `docs/assumptions.md`.
-
 For every phone number and address on file, predict how likely it is to reach
 the borrower (right-party contact), then decide per account whether to keep
 trying, switch contact point, switch channel, or trigger a skip-trace — with
