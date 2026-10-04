@@ -1,0 +1,57 @@
+# Field mapping: fake CN dialer CSV -> canonical InputEvent envelope.
+# SIMULATION-ONLY: this file describes a fictitious CN dialer extract used for
+# testing the adapter. Column names, codes and formats are invented.
+#
+# Spec forms for `fields:` / `payload:` entries:
+#   key: source_column            # direct reference (dotted paths for nested JSON)
+#   key: {field: path}            # explicit field reference
+#   key: {const: value}           # constant for every row
+#   key: {field: path, map: {...}}# value map; unmapped non-null values reject the row
+#   key: {field: path, type: float|int|str, default: v}
+#   key: {contact_ref: true}      # the computed contact_point_ref hash (never raw PII)
+# Timestamps: {field: path, format: epoch_ms|epoch_s|iso|<strptime>, tz: <IANA>}
+#   `tz` names the source wall-clock zone; it is applied to naive timestamps
+#   (epoch values are absolute instants, tz is documentation-only for them).
+# event_id: {field: path, uuid5: true} derives a deterministic UUID from the raw id.
+
+source: cn_dialer_csv
+description: "SIMULATION-ONLY fake CN dialer extract (CSV, IST epoch-ms, own result codes)"
+format: csv
+
+contact_point:
+  raw_field: mobile_no
+  kind: phone
+
+fields:
+  event_id: {field: call_id, uuid5: true}
+  event_type: {const: dial_attempt}
+  lender_id: {field: lender_code}
+  borrower_id: {field: cust_id}
+  account_id: {field: loan_ac_no}
+  occurred_at: {field: call_start_ms, format: epoch_ms, tz: Asia/Kolkata}
+  received_at: {field: recv_ms, format: epoch_ms, tz: Asia/Kolkata}
+
+payload:
+  network_response:
+    field: result_code
+    map:
+      ANS: answered
+      NOANS: no_answer
+      BUSY: busy
+      SWOFF: switched_off
+      UNREACH: not_reachable
+      NOTEXIST: does_not_exist
+      HANGUP: immediate_hangup
+  ring_seconds: {field: ring_secs, type: float}
+  # Hashed ref, never the raw number (raw PII must not reach the store).
+  dialled_number: {contact_ref: true}
+  channel:
+    field: chan
+    map:
+      VB: voice_bot
+      TC: telecaller
+
+validation:
+  clock_skew_tolerance_seconds: 300
+  sample_rate: 0.01
+  sample_seed: 42

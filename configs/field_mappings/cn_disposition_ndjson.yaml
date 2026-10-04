@@ -1,0 +1,46 @@
+# Field mapping: fake CN disposition NDJSON -> canonical InputEvent envelope.
+# SIMULATION-ONLY: this file describes a fictitious CN disposition feed used for
+# testing the adapter. Field layout, codes and timestamp formats are invented.
+# Nested source fields use dotted paths (e.g. "meta.id").
+
+source: cn_disposition_ndjson
+description: "SIMULATION-ONLY fake CN disposition feed (NDJSON, nested, IST wall-clock)"
+format: ndjson
+
+contact_point:
+  raw_field: contact.mobile
+  kind: phone
+
+fields:
+  event_id: {field: meta.id, uuid5: true}
+  event_type: {const: disposition}
+  lender_id: {field: meta.lender}
+  borrower_id: {field: customer.borrower}
+  account_id: {field: customer.account}
+  occurred_at: {field: call.start, format: "%d-%m-%Y %H:%M:%S", tz: Asia/Kolkata}
+  received_at: {field: meta.recv_ts, format: iso}
+
+payload:
+  disposition:
+    field: outcome.code
+    map:
+      RPC: RPC
+      WN: wrong_number
+      TP: third_party
+      SO: switched_off
+      NR: not_reachable
+      PTP: promise_to_pay
+      DSP: dispute
+      CB: callback
+  remarks: {field: outcome.remarks}
+  agent_id: {field: outcome.agent}
+  channel:
+    field: outcome.channel
+    map:
+      voice_bot: voice_bot
+      telecaller: telecaller
+
+validation:
+  clock_skew_tolerance_seconds: 300
+  sample_rate: 0.01
+  sample_seed: 42
