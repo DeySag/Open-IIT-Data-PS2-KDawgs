@@ -23,6 +23,9 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# System prompt (local only)
+System Prompt.md
+
 # Logs
 *.log
 
