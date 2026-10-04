@@ -205,12 +205,35 @@ def test_save_load_roundtrip(tracker, tmp_path):
 
 
 def test_scorer_adapter_columns(tracker):
+    from src.rpc.models.state_tracker import StateTrackerScorer
+
     df = StateTrackerScorer(tracker).score_df(ASOF)
     for col in ("contact_point_ref", "p_rpc", "state_posterior", "recycled_risk", "confidence"):
         assert col in df.columns
     for k in STATE_KEYS:
         assert f"sp_{k}" in df.columns
     assert (df[[f"sp_{k}" for k in STATE_KEYS]].sum(axis=1) - 1.0).abs().max() < 1e-9
+
+
+def test_scorer_eval_protocol_and_registry(tracker):
+    """Scorer conforms to src.rpc.eval.protocol.Scorer and registers."""
+    from src.rpc.eval.protocol import STATE_COLUMNS, Scorer
+    from src.rpc.eval.registry import get_scorer
+    from src.rpc.models.state_tracker import StateTrackerScorer, try_register_eval
+    from src.rpc.models.state_tracker.model import StateTrackerScorer as STS
+
+    assert try_register_eval() is True
+    sc = get_scorer("state_tracker")
+    assert isinstance(sc, Scorer)
+    assert sc.name == "state_tracker"
+    refs = [s.contact_point_ref for s in tracker.score(ASOF)][:3]
+    sc_fitted = STS(tracker)
+    df = sc_fitted.score(ASOF, refs)
+    assert list(df["contact_point_ref"]) == refs
+    for col in ("p_rpc", "recycled_risk", "confidence", *STATE_COLUMNS):
+        assert col in df.columns
+    assert ((df["p_rpc"] >= 0.0) & (df["p_rpc"] <= 1.0)).all()
+    assert (df[list(STATE_COLUMNS)].sum(axis=1) - 1.0).abs().max() < 1e-9
 
 
 # ---------------------------------------------------------------------------

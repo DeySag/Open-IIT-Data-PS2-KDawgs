@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -746,7 +747,11 @@ class StateTracker:
         out: list[ContactPointScore] = []
         # map cp -> borrower for quick lookup
         cp2b = {cp: m["borrower_id"] for cp, m in self.line_meta.items()}
-        targets = list(wanted) if wanted else list(self.line_meta.keys())
+        if wanted is not None:
+            # preserve the requested order (deduped); unknown refs get priors
+            targets = list(dict.fromkeys(contact_point_refs or []))
+        else:
+            targets = list(self.line_meta.keys())
         for cp in targets:
             meta = self.line_meta.get(cp, {"borrower_id": None, "type": "phone", "source": "KYC"})
             ctype = meta.get("type", "phone")
@@ -979,10 +984,48 @@ class StateTracker:
 
 
 class StateTrackerScorer:
-    """Adapter returning the DataFrame form expected by the eval harness."""
+    """Adapter returning the DataFrame form expected by the eval harness.
 
-    def __init__(self, tracker: StateTracker) -> None:
-        self.tracker = tracker
+    Conforms to ``src.rpc.eval.protocol.Scorer`` (``name`` + ``score`` with
+    bare state columns) so the rolling-origin harness in ``src/rpc/eval``
+    can call it directly. ``score_df`` keeps the legacy expanded form with
+    ``sp_*`` columns and the ``state_posterior`` dict.
+    """
+
+    name = "state_tracker"
+
+    def __init__(
+        self, tracker: StateTracker | None = None, config: str | Path | dict[str, Any] | None = None
+    ) -> None:
+        self.tracker = tracker if tracker is not None else StateTracker(config)
+        self._config = config
+
+    def fit(self, events_df: pd.DataFrame, config: str | Path | dict[str, Any] | None = None) -> "StateTrackerScorer":
+        """Fit the underlying tracker on events (no labels). Returns self."""
+        self.tracker = StateTracker(config if config is not None else self._config)
+        self.tracker.fit(events_df)
+        return self
+
+    @property
+    def fitted_(self) -> bool:
+        return self.tracker.fitted_
+
+    def score(self, as_of: datetime | str, contact_point_refs: Sequence[str]) -> pd.DataFrame:
+        """Protocol shape: contact_point_ref, p_rpc, bare state columns, recycled_risk, confidence."""
+        scores = self.tracker.score(as_of, list(contact_point_refs))
+        rows = []
+        for s in scores:
+            row = {
+                "contact_point_ref": s.contact_point_ref,
+                "p_rpc": s.p_rpc,
+                "recycled_risk": s.recycled_risk,
+                "confidence": s.confidence,
+            }
+            for k in STATE_KEYS:
+                row[k] = s.state_posterior[k]
+            rows.append(row)
+        cols = ["contact_point_ref", "p_rpc", *list(STATE_KEYS), "recycled_risk", "confidence"]
+        return pd.DataFrame(rows, columns=cols)
 
     def score_df(self, as_of: str | datetime, contact_point_refs: list[str] | None = None) -> pd.DataFrame:
         scores = self.tracker.score(as_of, contact_point_refs)
@@ -1004,12 +1047,26 @@ class StateTrackerScorer:
         return pd.DataFrame(rows, columns=cols)
 
 
-def try_register_eval(scorer: StateTrackerScorer) -> bool:
-    """Register with the eval-harness registry if it exists on main."""
-    try:
-        from src.rpc.eval.registry import register  # type: ignore[import-not-found]
+def try_register_eval(
+    scorer: StateTrackerScorer | StateTracker | None = None,
+    config: str | Path | dict[str, Any] | None = None,
+) -> bool:
+    """Register with the eval-harness registry (``src.rpc.eval.registry``).
 
-        register("state_tracker", scorer)
+    With no arguments registers the ``StateTrackerScorer`` class itself as the
+    ``"state_tracker"`` factory (constructed empty, fit later). With a fitted
+    scorer/tracker, registers a factory returning it. Returns False (no crash)
+    when the registry is unavailable.
+    """
+    try:
+        from src.rpc.eval.registry import register_scorer
+
+        if scorer is None:
+            register_scorer("state_tracker", StateTrackerScorer)
+        elif isinstance(scorer, StateTrackerScorer):
+            register_scorer("state_tracker", lambda: scorer)
+        else:
+            register_scorer("state_tracker", lambda: StateTrackerScorer(tracker=scorer))
         return True
     except Exception:
         return False
