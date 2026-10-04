@@ -33,6 +33,7 @@ def _load(path: str) -> pd.DataFrame | None:
 def _train_frame(
     events: pd.DataFrame,
     cps: pd.DataFrame | None,
+    borrowers: pd.DataFrame | None,
     train_start: datetime,
     train_end: datetime,
     horizon_days: int,
@@ -47,7 +48,7 @@ def _train_frame(
         (ev["occurred_at"] > pd.to_datetime(train_start, utc=True))
         & (ev["occurred_at"] <= pd.to_datetime(train_end, utc=True))
     ]["contact_point_ref"].unique().tolist()
-    feats = builder(train_end, cands, ev, cps)  # type: ignore[operator]
+    feats = builder(train_end, cands, ev, cps, borrowers)  # type: ignore[operator]
     lab = observed_labels(ev, train_end, cands, horizon_days, rpc_responses, rpc_dispositions)
     fr = feats.merge(lab, on="contact_point_ref", how="left")
     fr = fr[~fr["censored"]].copy()  # dialled-only training; flagged in report
@@ -84,7 +85,8 @@ def main() -> None:
     from src.rpc.eval import _minifeatures as _mf
 
     notes.append(
-        "REAL feature layer in use."
+        "REAL feature layer in use (eval adapter over the in-memory event "
+        "source; mini columns backfilled only where the real output lacks them)."
         if builder is not _mf.build_minifeatures
         else "TEMPORARY DuckDB mini-features in use (src/rpc/eval/_minifeatures.py); switch when src/rpc/features lands."
     )
@@ -109,12 +111,12 @@ def main() -> None:
         ]["contact_point_ref"].unique().tolist()
         if not test_refs:
             continue
-        feats = builder(s.as_of, test_refs, ev, cps)  # type: ignore[operator]
+        feats = builder(s.as_of, test_refs, ev, cps, borrowers)  # type: ignore[operator]
         lab = observed_labels(ev, s.test_start, test_refs, lb["horizon_days"], lb["rpc_network_responses"], lb["rpc_dispositions"])
         base = feats.merge(lab, on="contact_point_ref", how="left")
         base_eval = base[~base["censored"]].copy()
 
-        tr_feats, tr_y, _ = _train_frame(ev, cps, s.train_start, s.train_end, lb["horizon_days"], lb["rpc_network_responses"], lb["rpc_dispositions"], builder)
+        tr_feats, tr_y, _ = _train_frame(ev, cps, borrowers, s.train_start, s.train_end, lb["horizon_days"], lb["rpc_network_responses"], lb["rpc_dispositions"], builder)
         acc_map = None
         if cps is not None and "account_id" in cps.columns:
             acc_map = cps[["contact_point_ref", "account_id"]]
@@ -128,7 +130,14 @@ def main() -> None:
         if not tr_feats.empty and tr_y.notna().any() and tr_y.nunique() >= 2:
             agb = get_scorer("account_gbm")
             if acc_map is not None:
-                tr_acc = tr_feats.merge(acc_map, on="contact_point_ref", how="left")["account_id"].fillna("UNK")
+                # The real feature layer already emits account_id, so the merge
+                # may suffix columns (account_id_x/y). Coalesce all variants.
+                _m = tr_feats.merge(acc_map, on="contact_point_ref", how="left")
+                _parts = [_m[c] for c in ("account_id", "account_id_y", "account_id_x") if c in _m.columns]
+                tr_acc = _parts[0]
+                for _p in _parts[1:]:
+                    tr_acc = tr_acc.fillna(_p)
+                tr_acc = tr_acc.fillna("UNK")
                 agb.fit(tr_feats, tr_y, tr_acc)  # type: ignore[union-attr]
                 agb.attach_context(pd.DataFrame({"contact_point_ref": test_refs}).merge(acc_map, on="contact_point_ref", how="left").fillna("UNK"))  # type: ignore[union-attr]
             scorers["account_gbm"] = agb

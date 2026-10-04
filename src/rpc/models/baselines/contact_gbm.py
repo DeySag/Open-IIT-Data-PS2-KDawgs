@@ -46,11 +46,12 @@ class ContactGBMScorer:
             return pd.DataFrame(
                 {"contact_point_ref": refs, "p_rpc": self._base_rate, "confidence": 0.5}
             )
-        fr = (
-            pd.DataFrame({"contact_point_ref": refs})
-            .merge(self._features, on="contact_point_ref", how="left")
-            .fillna(0.0)
+        fr = pd.DataFrame({"contact_point_ref": refs}).merge(
+            self._features, on="contact_point_ref", how="left"
         )
+        # No blanket fillna here: to_matrix() handles NaN per column
+        # (recency NaN -> far-past sentinel, rest -> 0), and a blanket
+        # fillna(0.0) raises on the real layer's nullable boolean columns.
         X, _ = to_matrix(fr)
         try:
             p = self._model.predict_proba(X)[:, 1]  # type: ignore[union-attr]

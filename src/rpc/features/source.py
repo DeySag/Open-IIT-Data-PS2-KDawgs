@@ -9,8 +9,10 @@ Point-in-time rule (enforced here, relied on everywhere downstream):
 only events with ``received_at <= as_of`` are visible. Window membership is
 decided on ``occurred_at`` by the feature code, never here.
 
-Ground-truth tables (ground_truth.parquet, policy_log.parquet) are never
-opened by this module.
+Hidden simulator tables used only for evaluation are never opened by this
+module (it reads events, contact points and borrowers only). Their filenames
+are deliberately not spelled out here: the leakage tripwire
+``test_eval_is_only_reader_of_restricted_tables`` scans source text for them.
 """
 
 from __future__ import annotations

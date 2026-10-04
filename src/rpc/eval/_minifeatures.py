@@ -1,9 +1,10 @@
 """TEMPORARY mini-features for the eval harness (simulation-only).
 
-DELETE/MIGRATE when the real feature layer lands: if ``src.rpc.features``
-exposes ``build_features`` (per its spec.py on main), :func:`get_feature_builder`
-returns it; until then this module builds a small point-in-time feature set
-with DuckDB straight from ``data/events.parquet`` (+ contact_points when present).
+If ``src.rpc.features`` has landed, :func:`get_feature_builder` returns an
+adapter around its ``build_features`` (same 5-argument eval signature, PIT
+semantics preserved); until then this module builds a small point-in-time
+feature set with DuckDB straight from ``data/events.parquet`` (+ contact_points
+when present).
 
 Point-in-time guarantee: every aggregate filters ``received_at <= as_of``.
 No ground-truth or policy-log column is ever referenced here.
@@ -37,13 +38,88 @@ MINI_FEATURE_COLUMNS = [
 
 
 def try_real_feature_builder() -> Callable | None:
-    """Return the real feature builder if the feature layer has landed, else None."""
-    try:
-        from src.rpc.features import build_features  # type: ignore[import-not-found]
+    """Return an eval-signature adapter around the real feature layer, else None.
 
-        return build_features
+    The real ``build_features(as_of, source, refs)`` takes an ``EventSource``;
+    eval call sites use ``builder(as_of, refs, events, contact_points,
+    borrowers)``. The adapter bridges the two without changing PIT semantics:
+    the in-memory source filters ``received_at <= as_of`` exactly like the
+    Parquet one, and only mini columns the real output lacks are backfilled
+    (baselines contract: ``n_attempts``/``consec_failures``/...), never
+    overwriting real columns.
+    """
+    try:
+        from src.rpc.features import build_features as _real
+        from src.rpc.features.source import (
+            ALLOWED_BORROWER_COLUMNS,
+            DataFrameEventSource,
+        )
     except Exception:
         return None
+
+    def _adapter(
+        as_of: datetime,
+        contact_point_refs: Sequence[str],
+        events: pd.DataFrame,
+        contact_points: pd.DataFrame | None = None,
+        borrowers: pd.DataFrame | None = None,
+    ) -> pd.DataFrame:
+        refs = list(contact_point_refs)
+        if borrowers is None:
+            borrowers = pd.DataFrame({c: [] for c in ALLOWED_BORROWER_COLUMNS})
+        source = DataFrameEventSource(
+            events,
+            _complete_contact_points(contact_points, events, as_of),
+            borrowers,
+        )
+        real = _real(as_of, source, refs)
+        mini = build_minifeatures(as_of, refs, events, contact_points)
+        extra = [c for c in mini.columns if c not in real.columns]
+        if extra:
+            real = real.merge(
+                mini[["contact_point_ref", *extra]],
+                on="contact_point_ref",
+                how="left",
+            )
+        return real
+
+    return _adapter
+
+
+def _complete_contact_points(
+    contact_points: pd.DataFrame | None,
+    events: pd.DataFrame,
+    as_of: datetime,
+) -> pd.DataFrame:
+    """Supply the keys ``DataFrameEventSource.load_contact_points`` needs.
+
+    Eval fixtures often carry only ``(contact_point_ref, account_id,
+    is_primary)``. Missing ``lender_id``/``borrower_id`` are backfilled from
+    the per-ref mode in events (otherwise the real layer's
+    ``(lender, borrower, ref)`` universe would double-count rows); a missing
+    ``created_at`` is backfilled with the earliest event time so fixture
+    records are visible at any ``as_of``. Assumption: fixture contact points
+    are known from the start of the event history.
+    """
+    cps = pd.DataFrame() if contact_points is None else contact_points.copy()
+    if "contact_point_ref" not in cps.columns:
+        cps["contact_point_ref"] = pd.Series(dtype=object)
+    ev = events.copy() if events is not None else pd.DataFrame()
+    for key in ("lender_id", "borrower_id"):
+        if key not in cps.columns and key in ev.columns:
+            mode = (
+                ev.dropna(subset=[key])
+                .groupby("contact_point_ref")[key]
+                .agg(lambda s: s.mode().iat[0] if not s.mode().empty else None)
+            )
+            cps[key] = cps["contact_point_ref"].map(mode)
+    if "created_at" not in cps.columns:
+        if not ev.empty and "occurred_at" in ev.columns:
+            base = pd.to_datetime(ev["occurred_at"], utc=True).min()
+        else:
+            base = pd.Timestamp(as_of, tz="UTC")
+        cps["created_at"] = base
+    return cps
 
 
 def get_feature_builder() -> Callable:
@@ -87,11 +163,14 @@ def build_minifeatures(
     contact_point_refs: Sequence[str],
     events: pd.DataFrame,
     contact_points: pd.DataFrame | None = None,
+    borrowers: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """PIT-correct per-contact-point features from raw events (temporary).
 
     Only rows with ``received_at <= as_of`` contribute. Contact points with no
     history get zero counts and NaN recency fields (callers may fill).
+    ``borrowers`` is accepted for signature uniformity with the real-layer
+    adapter and ignored (mini-features use no account context).
     """
     as_of_ts = pd.Timestamp(as_of)
     if as_of_ts.tzinfo is None:
