@@ -48,6 +48,12 @@ class ServeConfig:
     # Security (placeholder)
     api_key: str | None = None
 
+    # Event store backend: DuckDB file path for the real ingest event store.
+    # None (default) keeps the previous in-memory store; set a path (directly
+    # or via configs/serve.yaml) to persist intake through real ingestion
+    # (validation, dedupe, dead-letter, dirty marking).
+    event_store_db: str | None = None
+
     @classmethod
     def load(cls, path: str | None = None) -> ServeConfig:
         """Load config, optionally merging a YAML file if present."""

@@ -1,0 +1,29 @@
+# Field mapping: serving-layer intake (already-canonical InputEvents).
+# SIMULATION-ONLY pipeline glue. The serving layer receives validated
+# InputEvent objects, so this mapping is the identity: contact_point_ref is
+# already a hash (hash_passthrough) and payload arrives as a JSON string.
+
+source: api
+description: "Identity mapping for validated InputEvents from the serving layer"
+format: dataframe
+
+contact_point:
+  raw_field: contact_point_ref
+  kind: hash_passthrough
+
+fields:
+  event_id: {field: event_id}
+  event_type: {field: event_type}
+  lender_id: {field: lender_id}
+  borrower_id: {field: borrower_id}
+  account_id: {field: account_id}
+  occurred_at: {field: occurred_at, format: iso}
+  received_at: {field: received_at, format: iso}
+
+# Payload arrives as a JSON string column; parsed per row into the payload dict.
+payload_json_field: payload
+
+validation:
+  clock_skew_tolerance_seconds: 300
+  sample_rate: 0.01
+  sample_seed: 42

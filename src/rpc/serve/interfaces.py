@@ -5,9 +5,14 @@ Real implementations will replace these stubs when available from other workstre
 
 from __future__ import annotations
 
+import json
+import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Protocol
 from uuid import UUID
+
+import pandas as pd
 
 from src.rpc.contracts import (
     Action,
@@ -19,6 +24,8 @@ from src.rpc.contracts import (
     StatePosterior,
     TraceInfo,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class EventStore(Protocol):
@@ -293,8 +300,16 @@ class InMemoryDecider:
 
 # ==================== Factory Functions ====================
 
-def get_event_store() -> EventStore:
-    """Get EventStore instance (stub for now)."""
+def get_event_store(config: Any | None = None) -> EventStore:
+    """Get an event store: real DuckDB store when configured, else in-memory.
+
+    The real store is selected by ``config.event_store_db`` (a DuckDB file
+    path). Anything else (including no config) keeps the previous default so
+    existing callers and tests are unaffected.
+    """
+    db_path = getattr(config, "event_store_db", None)
+    if db_path:
+        return DuckDBEventStoreAdapter(db_path=db_path)
     return InMemoryEventStore()
 
 
@@ -306,3 +321,95 @@ def get_scorer() -> Scorer:
 def get_decider() -> Decider:
     """Get Decider instance (stub for now)."""
     return InMemoryDecider()
+
+
+class DuckDBEventStoreAdapter:
+    """Serve-protocol adapter over the real DuckDB event store.
+
+    Intake batches are already-canonical ``InputEvent`` objects, so they go
+    through the identity ``api`` field mapping (validation, dedupe on
+    ``event_id`` keeping earliest ``received_at``, dead-letter quarantine and
+    dirty marking all apply). Reads convert stored rows back to
+    ``InputEvent``. Only counts are logged, never event contents.
+    """
+
+    def __init__(self, db_path: str | Path | None = None) -> None:
+        from src.rpc.ingest.store import IngestConfig
+
+        self._config = IngestConfig(db_path=str(db_path) if db_path else "")
+
+    @staticmethod
+    def _frame_event(event: InputEvent) -> dict[str, Any]:
+        dumped = event.model_dump(mode="json")
+        payload = dumped.pop("payload")
+        dumped["payload"] = json.dumps(payload, sort_keys=True)
+        return dumped
+
+    def ingest(self, batch: list[InputEvent], source: str) -> dict[str, int]:
+        from src.rpc.ingest import ingest as real_ingest
+
+        if not batch:
+            return {"accepted": 0, "duplicate": 0, "rejected": 0, "dirty_marked": 0}
+        frame = pd.DataFrame([self._frame_event(event) for event in batch])
+        # Events are canonical by construction (validated by FastAPI), so the
+        # identity "api" mapping applies regardless of the caller's label.
+        result = real_ingest(frame, "api", config=self._config)
+        logger.info(
+            "store adapter ingest rows=%d accepted=%d duplicate=%d rejected=%d "
+            "dirty_marked=%d",
+            len(batch),
+            result["accepted"],
+            result["duplicate"],
+            result["rejected"],
+            result["dirty_marked"],
+        )
+        return result
+
+    def read_events(
+        self,
+        lender_id: str | None = None,
+        borrower_id: str | None = None,
+        account_id: str | None = None,
+        contact_point_ref: str | None = None,
+        event_type: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = 1000,
+    ) -> list[InputEvent]:
+        from src.rpc.ingest import read_events as real_read_events
+
+        frame = real_read_events(
+            received_before=until,
+            event_types=[event_type] if event_type else None,
+            lender_id=lender_id,
+            contact_point_refs=[contact_point_ref] if contact_point_ref else None,
+            db_path=self._config.db_path,
+        )
+        if borrower_id is not None:
+            frame = frame[frame["borrower_id"] == borrower_id]
+        if account_id is not None:
+            frame = frame[frame["account_id"] == account_id]
+        if since is not None:
+            frame = frame[pd.to_datetime(frame["occurred_at"], utc=True) >= since]
+        frame = frame.sort_values("occurred_at", kind="stable").head(limit)
+        return [self._row_to_event(row) for _, row in frame.iterrows()]
+
+    @staticmethod
+    def _row_to_event(row: pd.Series) -> InputEvent:
+        occurred = row["occurred_at"]
+        received = row["received_at"]
+        return InputEvent(
+            event_id=UUID(str(row["event_id"])),
+            event_type=str(row["event_type"]),
+            lender_id=str(row["lender_id"]),
+            borrower_id=str(row["borrower_id"]),
+            account_id=str(row["account_id"]),
+            contact_point_ref=str(row["contact_point_ref"]),
+            occurred_at=occurred.to_pydatetime()
+            if hasattr(occurred, "to_pydatetime")
+            else occurred,
+            received_at=received.to_pydatetime()
+            if hasattr(received, "to_pydatetime")
+            else received,
+            payload=json.loads(str(row["payload"])),
+        )

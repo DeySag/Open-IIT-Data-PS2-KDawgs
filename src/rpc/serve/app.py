@@ -51,9 +51,9 @@ from src.rpc.serve.interfaces import (
     Decider,
     EventStore,
     InMemoryDecider,
-    InMemoryEventStore,
     InMemoryScorer,
     Scorer,
+    get_event_store,
 )
 from src.rpc.serve.suppression import SuppressionStore
 
@@ -234,7 +234,7 @@ def create_app(
     """Build the FastAPI app with injectable dependencies."""
 
     cfg = config or ServeConfig.load()
-    store: EventStore = event_store or InMemoryEventStore()
+    store: EventStore = event_store or get_event_store(cfg)
     scoring: Scorer = scorer or InMemoryScorer(cfg.model_version)
     deciding: Decider = decider or InMemoryDecider(cfg.model_version)
     suppression = SuppressionStore(cfg.model_version)
