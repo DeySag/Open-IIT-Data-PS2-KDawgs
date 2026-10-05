@@ -4,47 +4,20 @@ Point-in-time feature pipeline in `src/rpc/features/`. One row per phone or
 address contact point known at `as_of`, for health-model training and scoring.
 Everything here is simulation-only unless stated otherwise.
 
-## 1. Real source schemas (inspected 2026-10-04, dev simulator v0 output)
+## 1. Input schemas (official extracts)
 
-Generated with `python -m src.rpc.sim.generate --config configs/sim.yaml
---scale dev` (5000 borrowers, 13028 contact points, 220610 events).
+The pipeline reads the official CN extracts, not simulator output. Schema,
+codebook, null rates, join integrity, and leakage rules for those files:
+`docs/dataset_audit.md` (committed brief) and the deep records in `datasets/`
+(`01_dataset_audit.md` column inventory, `02_labels_and_entities.md`,
+`03_leakage_and_censoring.md`, `04_ps2_eda.md`).
 
-**`data/borrowers.parquet`** (5000 x 7): `borrower_id` (str, `BORR_%07d`),
-`lender_id` (str, `LENDER_%03d`, 10 lenders), `product` (str:
-secured_retail / unsecured_retail / msme / microfinance), `dpd_bucket` (str:
-X / 1-30 / 31-60 / 61-90 / 90+), `dpd_days` (int64), `outstanding` (float64,
-lognormal ~22k median), `secured` (bool). No `account_id` column: account ids
-come from events (`ACC_<borrower-seq>`); contact points without visible events
-fall back to `ACC_<borrower-seq>` deterministically.
-
-**`data/contact_points.parquet`** (13028 x 8): `contact_point_ref` (str,
-16-hex hash == `value_hash`), `borrower_id`, `lender_id`, `type` (str:
-phone 11064 / address 1964), `value_hash`, `source` (str: KYC 5055 /
-later_update 3337 / bureau 2060 / borrower_on_call 1298 / skip_trace 1278 —
-note `KYC` uppercase vs lowercase siblings), `is_primary` (bool),
-`created_at` (tz-aware UTC, spans now-365d, so some records post-date the
-event horizon and are correctly excluded by PIT filtering). **No
-`shared_reason` or other hidden column is present**; the loader still selects
-an allow-list and reports anything unexpected (see `dropped_columns`).
-
-**`data/events.parquet`** (220610 x 9): `event_id` (str uuid, 0 duplicates),
-`event_type` (str: **only `dial_attempt` in simulator v0**),
-`lender_id`, `borrower_id`, `account_id`, `contact_point_ref`,
-`occurred_at` / `received_at` (ISO-8601 strings with `+00:00`; received lags
-occurred by 1-60 min), `payload` (JSON string, exactly one key set:
-`{network_response, ring_seconds}`). Network responses observed: no_answer
-99329 / answered 33264 / switched_off 33153 / not_reachable 21986 /
-does_not_exist 11054 / immediate_hangup 11015 / busy 10809. Event horizon:
-2026-04-07 -> 2026-10-04 (~180 days, despite the "30 days" note in the task;
-windows 1/3/7/14/30 are all usable).
-
-**Missing from simulator v0 (feature code handles them, all null/0 here):**
-`disposition`, `bot_transcript`, `field_visit`, `contact_point_update`,
-`payment` events; therefore remark/bot/field/update/payment/agent features
-are unpopulated on v0 data (null rates ~100%, expected). No
-`ground_truth.parquet` or `policy_log.parquet` exists; nothing in
-`src/rpc/features/` references them (asserted in tests). No `agent_id` is
-observed anywhere, so `agent_wrong_number_rate` is skipped with this note.
+Key consequences for features (all verified in the audit): contact reference
+is the stable CN `phone_id`/`address_id` (numbers arrive masked); only one
+timestamp per event (assume received == occurred; late-event handling stays
+synthetic-test-only); transcript content is absent (`has_transcript` without
+a table); account snapshot fields are quarantined until their as-of is
+confirmed; `verified_contact_points` is eval-only gold, never input.
 
 ## 2. Point-in-time contract
 
@@ -79,7 +52,7 @@ patterns in `configs/text_patterns.yaml`. Assumptions are tracked in
 ## 5. Feature registry (generated from `spec.py`; do not edit by hand)
 
 The conditional `agent_wrong_number_rate` row is emitted only when an
-`agent_id` is observed in disposition payloads (absent on simulator v0 data).
+`agent_id` is observed in disposition payloads.
 
 <!-- REGISTRY:START -->
 | feature | group | dtype | source events | window | null semantics | description |

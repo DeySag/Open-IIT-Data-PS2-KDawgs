@@ -4,9 +4,10 @@ The serving layer exposes the contact-point state decisions to CN
 consumers (dialer, campaign engine, skip-trace queue, compliance
 controls, visit planner). All endpoints live under `/v1`.
 
-**Simulation-only.** Every number returned by this service is
-derived from the synthetic simulator. Nothing here is a real-world
-measurement. Assumptions live in `configs/` and `docs/assumptions.md`.
+**Data provenance.** Every number returned by this service derives from the
+issued extracts (see `docs/dataset_audit.md`). Nothing here is a real-world
+measurement beyond what those extracts contain. Assumptions live in
+`configs/` and `docs/assumptions.md`.
 
 ## Conventions
 

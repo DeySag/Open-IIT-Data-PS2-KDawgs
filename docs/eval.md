@@ -44,13 +44,11 @@ metric family (baselines vs any registered model), with n and bootstrap CIs.
 - Only `src/rpc/eval` may read `ground_truth.parquet` / `policy_log.parquet`
   (leakage test enforces this at file level; baselines are scanned too).
 
-## Current status (2026-10-04)
+## Current status (2026-10-05)
 
-- Sim v0 `generate.py` crashes (`timedelta` + `numpy.int64`, reported to sim
-  workstream, not patched: outside ownership). Dev data for the first green
-  run was produced by a throwaway script mirroring sim v0 schema (30-day
-  horizon, 5k borrowers / 13k contact points / 66.5k events); `data/` is
-  gitignored. No `ground_truth.parquet` / `policy_log.parquet` exist yet, so
-  oracle and IPW tables are skipped with explicit notes.
-- Incumbent policy params live in `configs/eval.yaml` (`incumbent:`) because
-  `configs/sim.yaml` has no `policy:` section in sim v0 (assumed values).
+- The harness runs on the official CN extracts via mapping + canonical store
+  (see `docs/dataset_audit.md`). Oracle tables light up only when annotated
+  ground truth is provided; otherwise they are skipped with explicit notes.
+  The verified-contact-points set (250 rows) is the current gold candidate.
+- Incumbent policy params live in `configs/eval.yaml` (`incumbent:`,
+  assumed values pending confirmation against the extracts).

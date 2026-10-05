@@ -80,9 +80,9 @@ score identically regardless of siblings (verified in tests).
 
 ## 5. Priors (configs/state_tracker.yaml) — qualitative, leakage-free
 
-Every number is a round, coarse judgement, deliberately DIFFERENT from
-configs/sim.yaml (simulator truth; copying it would be leakage and would
-overstate real-world performance). Dirichlet strengths are weak
+Every number is a round, coarse judgement, deliberately NOT copied from any
+data-generating process (copying data-derived numbers would be leakage and
+would overstate real-world performance). Dirichlet strengths are weak
 (transition 20, emission 10, initial 5) so data dominates quickly.
 
 | Choice | Value shape | Domain reason |
@@ -138,13 +138,12 @@ small stub p_rpc. No address states are inferred in v0.
 - Unit/micro-fixture tests: 11 passed (see REPORT below).
 - Parameter recovery on a self-contained mini generator: T_S MAE < 0.15,
   T_A MAE < 0.10, E_net MAE < 0.15, decode accuracy above chance + 0.25.
-- Timings on dev-scale synthetic data (240k dial obs, 6k borrowers, mini
-  generator — simulator v0 is currently broken, see decision log 2026-10-04):
-  EM fit 3 iters 39 s (≈2.5 min for the configured 12 iters); scoring
-  10k lines 24 s (≈30 s dev, ≈10 min projected full, single-threaded).
-  `max_fit_borrowers: 5000` caps fit cost on full data.
-- Dev/full simulator runs vs baselines: pending simulator v1 ground-truth
-  outputs (workstream A); the slow eval test is written and skips cleanly
-  until then.
+- Timings on dev-scale invented fixture data (240k dial obs, 6k borrowers,
+  self-contained mini generator): EM fit 3 iters 39 s (≈2.5 min for the
+  configured 12 iters); scoring 10k lines 24 s. `max_fit_borrowers: 5000`
+  caps fit cost on larger data.
+- Comparison vs baselines on the official extracts: pending mapping work;
+  the slow eval test is written and skips cleanly until annotated extracts
+  are present (the 250-row verified set is the current gold candidate).
 - Unverified: calibration on real-shaped traffic, DPD-multiplier magnitudes,
   transcript-cue weights (placeholders), slot-multiplier hook (default 1.0).

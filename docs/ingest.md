@@ -1,7 +1,8 @@
-# Ingestion adapter + event store (SIMULATION-ONLY)
+# Ingestion adapter + event store
 
-All data handled here is synthetic (repo simulator output or invented fake CN
-formats). Nothing in this module has been validated against real CN data.
+Translates per-source extracts into the frozen canonical `InputEvent`
+envelope. Validated against the official CN extracts (see
+`docs/dataset_audit.md`); mapping work for those sources is tracked there.
 
 ## What it does
 
@@ -26,19 +27,20 @@ IngestAdapter(config).ingest / .read_events / .replay / .set_watermark(...)
 `source` selects `configs/field_mappings/<source>.yaml`.
 `db_path` defaults to `data/event_store.duckdb` (env override `INGEST_DB_PATH`).
 
-For the features workstream: `src/rpc/features/source.py` does not exist, so
-there is no `EventSource` protocol to implement. Read canonical events through
-`read_events` here -- it supports the point-in-time filters the feature store
-needs (`received_before`, `event_types`, `lender_id`, `contact_point_refs`).
-(coordinator: confirm this interface or point us at the protocol when it lands.)
+For the features workstream: read canonical events through `read_events`
+here -- it supports the point-in-time filters the feature store needs
+(`received_before`, `event_types`, `lender_id`, `contact_point_refs`) — and
+through the `IngestEventSource` adapter in `src/rpc/features/source.py`,
+which implements the `EventSource` protocol over this store (contact and
+borrower universes derived from events until dedicated tables land).
 
 ## Mapping files (`configs/field_mappings/`)
 
 | source | format | description |
 |---|---|---|
-| `cn_dialer_csv` | CSV | fake dialer: renamed columns, epoch-ms IST, own result codes (`ANS`, `SWOFF`, ...) |
-| `cn_disposition_ndjson` | NDJSON | fake dispositions: nested fields, `%d-%m-%Y %H:%M:%S` IST + ISO+05:30, own outcome codes (`PTP`, `WN`, ...) |
-| `simulator` | Parquet | repo simulator `events.parquet`: canonical columns, hash passthrough, JSON-string payload |
+| `cn_dialer_csv` | CSV | test-format dialer: renamed columns, epoch-ms IST, own result codes (`ANS`, `SWOFF`, ...) — adapter test fixture, not CN data |
+| `cn_disposition_ndjson` | NDJSON | test-format dispositions: nested fields, `%d-%m-%Y %H:%M:%S` IST + ISO+05:30, own outcome codes (`PTP`, `WN`, ...) — adapter test fixture, not CN data |
+| `api` | DataFrame | identity mapping for validated `InputEvent`s from the serving layer |
 
 Spec forms: `key: column`, `{field: a.b.c}` (nested), `{const: v}`,
 `{field, map: {...}}` (unmapped values reject the row as `unknown_enum`),
@@ -90,19 +92,10 @@ linear Python passes are single `Series.map` calls over individual columns and
 one `zip` pass assembling payload JSON for non-passthrough sources; pydantic
 runs only on rejected rows + the 1% sample.
 
-## Performance (SIMULATION-ONLY numbers, measured 2026-10-04)
+## Performance (superseded — see dataset audit)
 
-- Dev simulator output: `data/events.parquet`, 413,987 rows / 32.9 MB ->
-  ingest 21.1 s: `{accepted: 411928, duplicate: 2059, rejected: 0,
-  dirty_marked: 0}` (duplicates are the simulator's own 0.5% re-emitted
-  `duplicate_event_prob`, as configured). Store: 411,928 rows, ~75 MB,
-  ~19.5k rows/s -> 5M rows project to ~4.3 min, inside the 5-min budget
-  (projection only; full-scale ingest not yet measured).
-- Replay of the same file: 15.3 s, `{accepted: 0, duplicate: 413987,
-  rejected: 0}`, all three tables byte-identical afterwards.
-- 1M-row synthetic dialer-CSV stress (fake-CN path with hashing + payload
-  assembly, not the full-scale scenario): 104.4 s, ~9.6k rows/s, 0 rejected;
-  store ~196 MB.
-- Full-scale (5M) ingest: NOT measured -- simulator team is regenerating, and
-  real CN data may arrive first (2026-10-04). Must be re-run before claiming
-  the 5-min budget.
+Earlier simulator-output numbers (414k rows in ~21 s, 1M-row stress in
+~104 s, 5M projection ~4.3 min) are retired with the simulator. Ingest
+throughput is re-measured on the official extracts as part of the mapping
+work (`docs/dataset_audit.md` §13); this section keeps only the mechanism
+notes above, not the numbers.
