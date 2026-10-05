@@ -46,13 +46,14 @@
 
 ---
 
-## Simulator Assumptions (from configs/sim.yaml)
-All parameters in `configs/sim.yaml` are assumptions for CN/SMEs to confirm:
-- State transition probabilities
-- Emission probabilities
-- Disposition probabilities
-- Cost parameters
-- Recovery rates
-- Trace success rates
+## Official extracts (replaces the simulator section)
 
-See `configs/sim.yaml` for full list.
+The pipeline now reads the official CN extracts (`datasets/`, gitignored;
+see `docs/dataset_audit.md` for the audit). Simulator parameters below are
+retired with the simulator; assumptions awaiting CN confirmation live with
+the dataset audit's ask-CN list:
+
+- State transition/emission/disposition shapes (model priors stay qualitative
+  and leakage-free per `configs/state_tracker.yaml`)
+- Cost parameters, recovery rates, trace success rates (from observed
+  `cost_inr` and recovery outcomes, not assumed flat rates)
