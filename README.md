@@ -1,5 +1,4 @@
 # PS2 RPC: Right-Party Contact Prediction and Skip-Trace Prioritisation
-
 > **Data provenance.** The pipeline reads the official CN extracts in
 > `datasets/` (gitignored; see `docs/dataset_audit.md`). The dataset README
 > states their contents are invented, so every number derived from them is
