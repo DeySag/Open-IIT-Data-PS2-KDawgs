@@ -47,13 +47,18 @@ from src.rpc.serve.config import ServeConfig
 # ---------------------------------------------------------------------------
 
 def make_posterior(dominant: str, value: float = 0.80) -> dict:
-    """Build a state posterior with a clear dominant state."""
+    """Build a state posterior with a clear dominant state.
+
+    Background recycled mass stays below the decision layer's cost-ratio
+    cutoff (1/(1+100) ~= 0.0099) so healthy lines are not suppressed; this
+    matches the calibrated background in decision/stubs.py.
+    """
     posterior = {
         "valid_reachable": 0.02,
         "avoiding": 0.02,
         "temp_unreachable": 0.02,
         "switched_off_long": 0.02,
-        "recycled": 0.02,
+        "recycled": 0.005,
         "third_party": 0.02,
         "invalid": 0.02,
     }
@@ -249,12 +254,16 @@ def test_score_every_action_no_500(client):
     c = TestClient(app)
 
     cases = [
-        ("ACC_VALID", "cp_valid", "continue"),
-        ("ACC_AVOID", "cp_avoiding", "switch_channel"),
-        ("ACC_SWITCH", "cp_switched", "switch_contact_point"),
-        ("ACC_INVALID", "cp_invalid", "trace"),
+        # (account, ref, expected action, expected reason code). Expectations
+        # follow the real decision layer: a single dead line with no healthy
+        # alternative traces (cf. test_all_phones_dead_traces_with_reason_code
+        # in test_decision.py), it does not "switch" to a nonexistent line.
+        ("ACC_VALID", "cp_valid", "continue", "VALID_CONTINUE"),
+        ("ACC_AVOID", "cp_avoiding", "switch_channel", "AVOIDING_SWITCH_CHANNEL"),
+        ("ACC_SWITCH", "cp_switched", "trace", "SWITCHED_OFF_MOVE_OR_TRACE"),
+        ("ACC_INVALID", "cp_invalid", "trace", "INVALID_TRACE"),
     ]
-    for account_id, ref, expected_action in cases:
+    for account_id, ref, expected_action, _ in cases:
         c.post(
             "/v1/events",
             json=[
@@ -264,7 +273,7 @@ def test_score_every_action_no_500(client):
             ],
         )
 
-    for account_id, ref, expected_action in cases:
+    for account_id, ref, expected_action, expected_reason in cases:
         response = c.post(
             "/v1/score",
             json={"account_id": account_id, "lender_id": "LENDER_001"},
@@ -276,9 +285,15 @@ def test_score_every_action_no_500(client):
         assert decision.action == expected_action, (
             f"{account_id}: expected {expected_action}, got {decision.action}"
         )
-        assert decision.reason_code
+        assert decision.reason_code == expected_reason, (
+            f"{account_id}: expected {expected_reason}, got {decision.reason_code}"
+        )
         assert len(decision.ranked_contact_points) >= 1
         assert decision.valid_until > decision.as_of
+        if expected_action == "trace":
+            assert decision.trace is not None
+            assert decision.trace.recoverable_amount is not None
+            assert decision.trace.recoverable_amount >= 0
 
 
 def test_score_trace_includes_recoverable_amount(trace_app):

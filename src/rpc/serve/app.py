@@ -42,8 +42,6 @@ from src.rpc.contracts import (
 )
 from src.rpc.decision.engine import (
     GuardrailsEngine,
-    decide_action,
-    map_reason_code,
 )
 from src.rpc.serve.config import ServeConfig
 from src.rpc.serve.fast_path import RecycledSignalDetector
@@ -53,6 +51,7 @@ from src.rpc.serve.interfaces import (
     InMemoryDecider,
     InMemoryScorer,
     Scorer,
+    decide_from_ranked,
     get_event_store,
 )
 from src.rpc.serve.suppression import SuppressionStore
@@ -280,6 +279,22 @@ def create_app(
     # Helpers (reference app.state so dependencies are swappable)
     # ------------------------------------------------------------------
 
+    def _account_borrower(
+        lender_id: str | None,
+        account_id: str,
+    ) -> str | None:
+        """Look up the borrower owning an account from stored events."""
+        try:
+            events = app.state.event_store.read_events(
+                lender_id=lender_id, account_id=account_id, limit=1000
+            )
+        except Exception:
+            return None
+        borrowers = [event.borrower_id for event in events if event.borrower_id]
+        if not borrowers:
+            return None
+        return max(set(borrowers), key=borrowers.count)
+
     def _account_contact_points(
         lender_id: str | None,
     ) -> dict[str, list[str]]:
@@ -413,40 +428,26 @@ def create_app(
             )
             scores = [placeholder]
 
-        guardrail_result = app.state.guardrails.evaluate(
-            account_id, scores, ctx
+        borrower_id = (context or {}).get("borrower_id") or _account_borrower(
+            lender_id, account_id
         )
-        reason_code = map_reason_code(
-            scores[0].state_posterior, scores[0].p_rpc, guardrail_result
-        )
-        action, params = decide_action(
-            reason_code, guardrail_result, scores
-        )
+        # Simulation-only fallback: serving rarely knows the borrower id, but
+        # the decision layer needs one for trace candidates. Prefer the
+        # stored owner; otherwise derive a stable placeholder from the account.
+        ctx["borrower_id"] = borrower_id or f"BORR_FOR_{account_id}"
 
-        trace = None
-        if action == Action.TRACE:
-            trace = TraceInfo(
-                voi_per_rupee=1.0,
-                rank=1,
-                est_cost=cfg.trace_cost,
-                recoverable_amount=cfg.recoverable_amount_default,
+        # Single construction point: the real decide_full decision layer
+        # (guardrails -> exclusions -> action -> VOI gate), not the legacy
+        # shim. Suppressions it emits are persisted immediately.
+        result = decide_from_ranked(ctx, scores)
+        for entry in result.suppressions:
+            app.state.suppression.add(
+                entry.contact_point_ref,
+                entry.lender_id,
+                entry.reason,  # type: ignore[arg-type]
+                list(entry.evidence),
             )
-
-        decision = OutputDecision(
-            account_id=account_id,
-            lender_id=lender_id or "unknown",
-            as_of=as_of,
-            valid_until=as_of + timedelta(hours=cfg.validity_hours),
-            model_version=cfg.model_version,
-            feature_snapshot_id=cfg.feature_snapshot_id,
-            action=action,
-            action_params=params,
-            reason_code=reason_code,
-            ranked_contact_points=scores,
-            trace=trace,
-            flags=Flags(),
-        )
-        decision = _apply_stale_guardrails(decision, stale)
+        decision = _apply_stale_guardrails(result.decision, stale)
         return decision, stale
 
     # ------------------------------------------------------------------

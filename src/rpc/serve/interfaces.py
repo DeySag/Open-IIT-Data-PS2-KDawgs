@@ -232,7 +232,12 @@ class InMemoryScorer:
 
 
 class InMemoryDecider:
-    """In-memory stub for Decider."""
+    """In-memory stub for Decider.
+
+    Delegates to the real ``decide_full`` decision layer so served decisions
+    always carry VOI-gated trace logic and suppression outputs; only the
+    scores/context fed in are stub-grade unless callers inject real ones.
+    """
 
     def __init__(self, model_version: str = "v0.1.0-stub") -> None:
         self.model_version = model_version
@@ -242,45 +247,9 @@ class InMemoryDecider:
         ctx: dict[str, Any],
         scores: list[RankedContactPoint],
     ) -> OutputDecision:
-        from src.rpc.decision.engine import GuardrailsEngine, decide_action, map_reason_code
-
-        guardrails = GuardrailsEngine()
-        guardrail_result = guardrails.evaluate(ctx.get("account_id", ""), scores, ctx)
-
         if not scores:
             raise ValueError("No scores provided for decision")
-
-        reason_code = map_reason_code(scores[0].state_posterior, scores[0].p_rpc, guardrail_result)
-        action, params = decide_action(reason_code, guardrail_result, scores)
-
-        as_of = ctx.get("as_of", datetime.now())
-        feature_snapshot_id = ctx.get("feature_snapshot_id", "fs_dev")
-
-        # Build trace info if action is TRACE
-        trace = None
-        if action == Action.TRACE:
-            recoverable_amount = ctx.get("recoverable_amount", 50000.0)
-            trace = TraceInfo(
-                voi_per_rupee=1.5,
-                rank=1,
-                est_cost=500.0,
-                recoverable_amount=recoverable_amount,
-            )
-
-        return OutputDecision(
-            account_id=ctx.get("account_id", "unknown"),
-            lender_id=ctx.get("lender_id", "unknown"),
-            as_of=as_of,
-            valid_until=as_of,
-            model_version=self.model_version,
-            feature_snapshot_id=feature_snapshot_id,
-            action=action,
-            action_params=params,
-            reason_code=reason_code,
-            ranked_contact_points=scores,
-            trace=trace,
-            flags=Flags(),
-        )
+        return decide_from_ranked(ctx, scores).decision
 
     def rank_trace(
         self,
@@ -296,6 +265,103 @@ class InMemoryDecider:
                 total_cost += c.get("est_cost", 0)
                 result.append(c)
         return result
+
+
+# ==================== Decision Seam ====================
+
+_DECISION_FLAG_KEYS = (
+    "dispute",
+    "no_consent",
+    "deceased_or_insolvent",
+    "dnd",
+    "legal_case",
+)
+
+
+def ranked_to_scores(
+    scores: list[RankedContactPoint], as_of: datetime
+) -> list[Any]:
+    """Convert contract scores to decision-layer ``ContactPointScore``.
+
+    ``recycled_risk`` has no contract field, so it comes from the posterior's
+    ``recycled`` mass. Returns decision-layer objects (typed as ``Any`` here
+    to keep this adapter module import-light).
+    """
+    from src.rpc.decision.types import ContactPointScore as DecisionScore
+
+    out: list[Any] = []
+    for ranked in scores:
+        posterior = ranked.state_posterior
+        posterior_dict = (
+            posterior.model_dump() if hasattr(posterior, "model_dump") else dict(posterior)
+        )
+        ctype = ranked.type.value if hasattr(ranked.type, "value") else str(ranked.type)
+        out.append(
+            DecisionScore(
+                contact_point_ref=ranked.ref,
+                type=ctype,
+                as_of=as_of,
+                state_posterior=posterior_dict,
+                p_rpc=ranked.p_rpc,
+                recycled_risk=float(posterior_dict.get("recycled", 0.0)),
+                confidence=ranked.confidence,
+            )
+        )
+    return out
+
+
+def build_account_context(ctx: dict[str, Any], as_of: datetime) -> Any:
+    """Assemble a decision-layer ``AccountContext`` from a serve ctx dict.
+
+    Known keys are honoured (account/lender/borrower ids, dpd/product/secured/
+    outstanding, flags, suppressed_refs, attempts, trace_pending,
+    whatsapp_opt_in); everything else falls back to documented
+    simulation-only defaults. ``suppression`` maps ref -> truthy.
+    """
+    from src.rpc.decision.types import AccountContext, AccountFlags
+
+    flags_in = ctx.get("flags", {})
+    if not isinstance(flags_in, dict):
+        flags_in = {}
+    flags = AccountFlags(
+        **{key: bool(flags_in.get(key, False)) for key in _DECISION_FLAG_KEYS}
+    )
+    suppressed = ctx.get("suppression", {})
+    suppressed_refs = (
+        set(suppressed.keys()) if isinstance(suppressed, dict) else set(suppressed)
+    )
+    return AccountContext(
+        account_id=str(ctx.get("account_id", "unknown")),
+        lender_id=str(ctx.get("lender_id", "unknown")),
+        borrower_id=str(ctx.get("borrower_id", "unknown")),
+        dpd_bucket=str(ctx.get("dpd_bucket", "90+")),
+        product=str(ctx.get("product", "unsecured_retail")),
+        secured=bool(ctx.get("secured", False)),
+        outstanding=float(ctx.get("outstanding", 50000.0)),
+        now=as_of,
+        flags=flags,
+        suppressed_refs=set(suppressed_refs),
+        attempts_today=int(ctx.get("attempts_today", 0)),
+        attempts_week=int(ctx.get("attempts_week", 0)),
+        trace_pending=bool(ctx.get("trace_pending", False)),
+        whatsapp_opt_in=bool(ctx.get("whatsapp_opt_in", True)),
+    )
+
+
+def decide_from_ranked(
+    ctx: dict[str, Any], scores: list[RankedContactPoint]
+) -> Any:
+    """Run the real ``decide_full`` decision layer on ranked scores.
+
+    Returns the ``DecisionResult`` (decision + suppressions + reason codes).
+    Single construction point for ``OutputDecision`` in serving.
+    """
+    from src.rpc.decision.actions import decide_full
+
+    as_of = ctx.get("as_of")
+    if not isinstance(as_of, datetime):
+        as_of = datetime.now().astimezone()
+    return decide_full(build_account_context(ctx, as_of), ranked_to_scores(scores, as_of))
 
 
 # ==================== Factory Functions ====================
