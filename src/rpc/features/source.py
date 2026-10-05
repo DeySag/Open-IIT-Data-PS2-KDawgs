@@ -353,3 +353,98 @@ class DataFrameEventSource(EventSource):
 
     def describe(self) -> dict[str, Any]:
         return {"kind": "dataframe", "dropped_columns": self.dropped_columns}
+
+
+class IngestEventSource(EventSource):
+    """EventSource backed by the real DuckDB event store (ingest workstream).
+
+    Reads canonical, validated, deduped events through
+    ``ingest.read_events`` so downstream features inherit contact hashing,
+    validation and dedupe instead of reimplementing them. Contact-point and
+    borrower tables do not exist in the store, so both universes are derived
+    from events (first-seen fallbacks, documented in ``describe()``); the
+    dedicated record-history tables land with that workstream.
+
+    Imports are lazy so ``features`` never hard-depends on ``ingest``.
+    """
+
+    def __init__(self, db_path: str | Path | None = None) -> None:
+        from src.rpc.ingest.store import default_db_path
+
+        self.db_path = str(db_path or default_db_path())
+        self.dropped_columns = ["contact_points_table", "borrowers_table"]
+
+    def _read_store(self, **filters: Any) -> pd.DataFrame:
+        from src.rpc.ingest import read_events as ingest_read_events
+
+        return ingest_read_events(db_path=self.db_path, **filters)
+
+    def load_visible_events(self, as_of: pd.Timestamp) -> pd.DataFrame:
+        as_of = as_utc(as_of)
+        return canonicalize_events(self._read_store(received_before=as_of))
+
+    def load_events_window(
+        self, occurred_after: pd.Timestamp, occurred_le: pd.Timestamp
+    ) -> pd.DataFrame:
+        events = canonicalize_events(self._read_store())
+        m = (events["occurred_at"] > as_utc(occurred_after)) & (
+            events["occurred_at"] <= as_utc(occurred_le)
+        )
+        return events[m].reset_index(drop=True)
+
+    def load_contact_points(self, as_of: pd.Timestamp) -> pd.DataFrame:
+        """Contact universe derived from visible events (first-seen fallback).
+
+        ``created_at`` is the first ``received_at`` per contact point;
+        borrower/lender come from that same first-seen event. The ``type``
+        column is intentionally absent: feature code resolves it from
+        dial/bot/disposition/field evidence with a ``phone`` fallback.
+        """
+        visible = self.load_visible_events(as_of)
+        cols = ["contact_point_ref", "borrower_id", "lender_id", "received_at"]
+        if visible.empty:
+            return pd.DataFrame(
+                {
+                    "contact_point_ref": pd.Series(dtype="string"),
+                    "borrower_id": pd.Series(dtype="string"),
+                    "lender_id": pd.Series(dtype="string"),
+                    "created_at": pd.Series(dtype="datetime64[ns, UTC]"),
+                }
+            )
+        first = visible.sort_values("received_at", kind="mergesort").drop_duplicates(
+            "contact_point_ref", keep="first"
+        )
+        cp = first[cols].copy()
+        cp["created_at"] = cp["received_at"]
+        return cp.drop(columns=["received_at"]).reset_index(drop=True)
+
+    def load_borrowers(self) -> pd.DataFrame:
+        """Borrower universe derived from all stored events (no timestamps)."""
+        events = canonicalize_events(self._read_store())
+        if events.empty:
+            return pd.DataFrame(
+                {
+                    "borrower_id": pd.Series(dtype="string"),
+                    "lender_id": pd.Series(dtype="string"),
+                }
+            )
+        return events[["borrower_id", "lender_id"]].drop_duplicates().reset_index(
+            drop=True
+        )
+
+    def max_received(self) -> pd.Timestamp | None:
+        events = self._read_store()
+        if events.empty:
+            return None
+        return as_utc(events["received_at"].max())
+
+    def describe(self) -> dict[str, Any]:
+        return {
+            "kind": "ingest",
+            "db_path": self.db_path,
+            "dropped_columns": self.dropped_columns,
+            "note": (
+                "contact_points/borrowers derived from events (first-seen); "
+                "no dedicated tables in the store yet"
+            ),
+        }

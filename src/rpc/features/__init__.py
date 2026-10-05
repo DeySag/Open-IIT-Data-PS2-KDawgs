@@ -6,7 +6,12 @@ use the labels module directly where needed.
 """
 
 from src.rpc.features.features import build_features, build_training_table
-from src.rpc.features.source import DataFrameEventSource, EventSource, ParquetEventSource
+from src.rpc.features.source import (
+    DataFrameEventSource,
+    EventSource,
+    IngestEventSource,
+    ParquetEventSource,
+)
 from src.rpc.features.spec import build_registry, feature_names
 
 __all__ = [
@@ -17,4 +22,5 @@ __all__ = [
     "EventSource",
     "ParquetEventSource",
     "DataFrameEventSource",
+    "IngestEventSource",
 ]
