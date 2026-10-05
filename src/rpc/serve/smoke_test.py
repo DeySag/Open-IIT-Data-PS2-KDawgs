@@ -4,6 +4,11 @@ Posts a small batch of synthetic events, then exercises the
 decision, dial list, trace queue and suppression endpoints.
 Passes with the in-memory stubs and later with the real
 modules without code changes.
+
+``run_real_chain_smoke_test`` goes further: it fits the real state tracker
+on the posted events and serves decisions through the real ``decide_full``
+layer, proving the true pipeline (not just the stubs) runs end to end.
+All data below is synthetic and invented for this test.
 """
 
 from __future__ import annotations
@@ -13,17 +18,21 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+import pandas as pd
 from fastapi.testclient import TestClient
 
 from src.rpc.contracts import (
+    ContactPointType,
     DialAttemptPayload,
     Disposition,
     DispositionPayload,
     EventType,
     InputEvent,
     NetworkResponse,
+    RankedContactPoint,
+    StatePosterior,
 )
-from src.rpc.serve.app import app
+from src.rpc.serve.app import app, create_app
 
 
 def _event(
@@ -149,9 +158,121 @@ def run_smoke_test() -> None:
     print("Smoke test PASSED")
 
 
+class StateTrackerServeScorer:
+    """Serve ``Scorer`` protocol over a fitted state tracker (smoke-only).
+
+    Fits ``StateTracker`` on the given canonical event frame once, then
+    serves its real posteriors as ``RankedContactPoint`` objects. This is
+    what proves the served chain is real: the posteriors carry model
+    semantics (answered + RPC evidence concentrates ``valid_reachable``
+    mass), which a hash stub cannot guarantee.
+    """
+
+    def __init__(self, events: pd.DataFrame) -> None:
+        from src.rpc.models.state_tracker.model import (
+            StateTracker,
+            StateTrackerScorer,
+        )
+
+        self._scorer = StateTrackerScorer(tracker=StateTracker().fit(events))
+
+    def score(
+        self,
+        as_of: datetime,
+        contact_point_refs: list[str] | None = None,
+    ) -> list[RankedContactPoint]:
+        frame = self._scorer.score_df(as_of, list(contact_point_refs or []))
+        out: list[RankedContactPoint] = []
+        for _, row in frame.iterrows():
+            posterior = dict(row["state_posterior"])
+            out.append(
+                RankedContactPoint(
+                    ref=str(row["contact_point_ref"]),
+                    type=ContactPointType.PHONE,
+                    p_rpc=float(row["p_rpc"]),
+                    state_posterior=StatePosterior(**posterior),
+                    confidence=float(row["confidence"]),
+                )
+            )
+        return out
+
+
+def _frame_events(events: list[InputEvent]) -> pd.DataFrame:
+    """Frame canonical events for model fitting (payload kept as dicts)."""
+    rows = []
+    for event in events:
+        dumped = event.model_dump(mode="json")
+        dumped["payload"] = dict(dumped["payload"])
+        rows.append(dumped)
+    return pd.DataFrame(rows)
+
+
+def run_real_chain_smoke_test() -> None:
+    """Smoke the true pipeline: real tracker posteriors + real decide_full."""
+    print("Running real-chain smoke test...")
+    events = [
+        _event(
+            EventType.DIAL_ATTEMPT,
+            DialAttemptPayload(
+                network_response=NetworkResponse.ANSWERED,
+                ring_seconds=5.0,
+            ),
+        ),
+        _event(
+            EventType.DISPOSITION,
+            DispositionPayload(
+                disposition=Disposition.RPC,
+                remarks="borrower answered",
+            ),
+        ),
+    ]
+    real_app = create_app(scorer=StateTrackerServeScorer(_frame_events(events)))
+    client = TestClient(real_app)
+
+    response = client.post(
+        "/v1/events",
+        json=[e.model_dump(mode="json") for e in events],
+        headers={"X-Lender-Id": "LENDER_001"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["accepted"] == 2, response.text
+
+    response = client.post(
+        "/v1/score",
+        json={"account_id": "ACC_001", "lender_id": "LENDER_001"},
+        headers={"X-Lender-Id": "LENDER_001"},
+    )
+    assert response.status_code == 200, response.text
+    decision = response.json()["decision"]
+    assert decision["action"] in {
+        "continue",
+        "switch_contact_point",
+        "switch_channel",
+        "trace",
+    }
+    ranked = decision["ranked_contact_points"]
+    assert len(ranked) > 0
+    # Real-model semantics: answered + RPC evidence must concentrate
+    # valid_reachable mass. A hash stub cannot guarantee this.
+    for point in ranked:
+        total = sum(point["state_posterior"].values())
+        assert abs(total - 1.0) < 1e-6, point
+    dominant = max(
+        ranked[0]["state_posterior"], key=ranked[0]["state_posterior"].get
+    )
+    assert dominant == "valid_reachable", ranked[0]["state_posterior"]
+    assert decision["valid_until"] > decision["as_of"]
+    print(
+        f"  real-chain: action={decision['action']} "
+        f"reason={decision['reason_code']} dominant={dominant}"
+    )
+    print("Real-chain smoke test PASSED")
+
+
 if __name__ == "__main__":
     try:
         run_smoke_test()
+        run_real_chain_smoke_test()
     except AssertionError as exc:
         print(f"Smoke test FAILED: {exc}")
         sys.exit(1)
