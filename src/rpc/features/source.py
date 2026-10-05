@@ -9,7 +9,7 @@ Point-in-time rule (enforced here, relied on everywhere downstream):
 only events with ``received_at <= as_of`` are visible. Window membership is
 decided on ``occurred_at`` by the feature code, never here.
 
-Hidden simulator tables used only for evaluation are never opened by this
+Hidden ground-truth tables used only for evaluation are never opened by this
 module (it reads events, contact points and borrowers only). Their filenames
 are deliberately not spelled out here: the leakage tripwire
 ``test_eval_is_only_reader_of_restricted_tables`` scans source text for them.
@@ -51,7 +51,7 @@ ALLOWED_BORROWER_COLUMNS = [
 ]
 
 # Payload keys the feature layer knows how to use, per event type.
-# Unknown keys are ignored (forwardolg-compatible with richer simulators).
+# Unknown keys are ignored (forward-compatible with richer inputs).
 PAYLOAD_FIELDS = {
     "dial_attempt": ["network_response", "ring_seconds"],
     "disposition": ["disposition", "remarks", "agent_id"],
@@ -201,7 +201,7 @@ class EventSource(ABC):
 
 
 class ParquetEventSource(EventSource):
-    """Reads simulator Parquet output through DuckDB (simulation-only)."""
+    """Reads canonical Parquet input (events/contact_points/borrowers) through DuckDB."""
 
     def __init__(self, data_dir: str | Path):
         self.data_dir = Path(data_dir)

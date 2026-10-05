@@ -12,13 +12,14 @@ splits:
 
 labels:
   horizon_days: 7       # rpc_next_7d window after as_of
-  rpc_network_responses: ["answered"]   # dial_attempt responses counted as observed contact (proxy for RPC in sim v0)
+  rpc_network_responses: ["answered"]   # dial_attempt responses counted as observed contact (proxy for RPC; confirm code set against issued extracts)
   rpc_dispositions: ["RPC", "promise_to_pay", "callback"]  # disposition values counted as observed RPC
   dead_states: ["recycled", "invalid", "switched_off_long"]  # truly dead lines (oracle only)
   reachable_states: ["valid_reachable"]  # truly reachable (oracle only)
 
-# Incumbent attempt-count rule (assumed; configs/sim.yaml has no `policy:` section in sim v0,
-# so these live here until the simulator team documents the incumbent policy).
+# Incumbent attempt-count rule (assumed values pending confirmation against
+# the issued extracts; see docs/dataset_audit.md §6 for the reconstructable
+# propensities).
 incumbent:
   k_consecutive_failures: 3   # move off primary after k consecutive failures
   max_attempts_trace: 6       # trigger trace after this many total attempts

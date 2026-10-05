@@ -70,16 +70,19 @@ def main() -> None:
     ground_truth = _load(dc["ground_truth"])
     policy_log = _load(dc["policy_log"])
     if events is None or events.empty:
-        raise SystemExit(f"no events at {dc['events']}; run make data-dev first")
+        raise SystemExit(
+            f"no events at {dc['events']}; ingest the official extracts "
+            "first (see docs/dataset_audit.md §13)"
+        )
 
     notes = [
         "Metrics are DIALLED-ONLY unless noted: undialled contact points are censored (no observable outcome).",
         "All numbers are simulation-only; do not describe any result as real-world performance.",
     ]
     if ground_truth is None:
-        notes.append("ground_truth.parquet absent (sim v0): oracle tables skipped.")
+        notes.append("ground_truth.parquet absent: oracle tables skipped.")
     if policy_log is None:
-        notes.append("policy_log.parquet absent (sim v0): IPW second view skipped.")
+        notes.append("policy_log.parquet absent: IPW second view skipped.")
 
     builder = get_feature_builder()
     from src.rpc.eval import _minifeatures as _mf

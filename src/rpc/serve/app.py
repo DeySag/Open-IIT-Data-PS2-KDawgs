@@ -438,8 +438,12 @@ def create_app(
 
         # Single construction point: the real decide_full decision layer
         # (guardrails -> exclusions -> action -> VOI gate), not the legacy
-        # shim. Suppressions it emits are persisted immediately.
-        result = decide_from_ranked(ctx, scores)
+        # shim. It runs under the app's configured guardrails (so runtime
+        # toggles such as permissive test mode apply), and suppressions it
+        # emits are persisted immediately.
+        result = decide_from_ranked(
+            ctx, scores, guard_cfg=app.state.guardrails.config
+        )
         for entry in result.suppressions:
             app.state.suppression.add(
                 entry.contact_point_ref,

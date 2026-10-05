@@ -4,8 +4,8 @@ Other workstreams import from here. Do not change field names, key sets, or
 semantics without notifying the coordinator — downstream consumers (decision
 layer, serving, eval harness) depend on this exact shape.
 
-simulation-only: all probabilities produced by models using these types are
-estimates from synthetic data until refit on real CN data.
+model estimates: all probabilities produced by models using these types are
+estimates that require refit on issued data; never present them as measured.
 """
 
 from __future__ import annotations

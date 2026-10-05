@@ -37,8 +37,9 @@ REQUIRED_FIELDS = (
     "received_at",
 )
 
-# Hidden ground-truth columns (simulator internals). Must never reach the store
-# or features: dropped on load if present in input.
+# Hidden ground-truth columns (e.g. verification annotations joined by
+# mistake). Must never reach the store or features: dropped on load if
+# present in input.
 HIDDEN_GROUND_TRUTH_COLUMNS = frozenset(
     {
         "true_state",
@@ -157,7 +158,7 @@ def _canonical_event_id(values: pd.Series, source: str, derive: bool) -> pd.Seri
     as_str = _as_string(values)
     if derive:
         return _map_unique(as_str, lambda x: _derive_uuid(x, source))
-    # Fast vectorised path: 32-hex source ids (simulator) hyphenated in bulk.
+    # Fast vectorised path: 32-hex source ids hyphenated in bulk.
     bare32 = as_str.str.match(r"^[0-9a-fA-F]{32}$").fillna(False)
     out = pd.Series(pd.NA, index=values.index, dtype="string")
     if bare32.any():

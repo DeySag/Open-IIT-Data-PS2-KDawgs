@@ -1,7 +1,7 @@
 """Hidden-ground-truth join for evaluation only (simulation-only).
 
 This module exists so model evaluation can compare observed labels against
-the simulator's hidden state. It must never be imported from
+hidden state (e.g. verification annotations). It must never be imported from
 ``src/rpc/features/`` (asserted in tests).
 """
 
@@ -15,7 +15,7 @@ import pandas as pd
 def load_ground_truth(data_dir: str | Path) -> pd.DataFrame | None:
     """Load hidden ground truth for evaluation only.
 
-    Returns None when the table is absent (e.g. simulator v0 emits none).
+    Returns None when the table is absent.
     """
     path = Path(data_dir) / "ground_truth.parquet"
     if not path.exists():

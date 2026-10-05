@@ -2,12 +2,12 @@
 #
 # IMPORTANT - NO LEAKAGE: every number below is a coarse, qualitative prior
 # chosen from domain reasoning (see docs/state_tracker.md justification table),
-# NOT copied from configs/sim.yaml. sim.yaml holds simulator truth used only to
-# generate synthetic data; copying its numbers into model priors would be
-# leakage and would overstate real-world performance. Strengths below are
-# deliberately weak (Dirichlet pseudo-counts) so data dominates quickly.
+# NOT copied from any data-generating process. Copying data-derived numbers
+# into model priors would be leakage and would overstate real-world
+# performance. Strengths below are deliberately weak (Dirichlet pseudo-counts)
+# so data dominates quickly.
 #
-# All probabilities are simulation-only assumptions for CN/SMEs to confirm.
+# All probabilities are assumptions for CN/SMEs to confirm.
 
 model_version: "state_tracker_v0.1.0"
 

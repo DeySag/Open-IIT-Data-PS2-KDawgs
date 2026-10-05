@@ -1,6 +1,6 @@
 """Baseline (a): incumbent attempt-count rule (simulation-only).
 
-Re-implements the incumbent policy as documented for configs/sim.yaml:
+Re-implements the incumbent policy as configured in configs/eval.yaml:
 rank primary first, move on after k consecutive failures, trace after a fixed
 number of total attempts. Produces both a score (for ranking) and an action
 (one of continue / switch_contact_point / trace).

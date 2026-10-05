@@ -1,6 +1,7 @@
 """State tracker: contact-point HMM + borrower avoidance latent.
 
-simulation-only: parameters are fit on synthetic data until refit on real CN data.
+Model parameters require fitting on issued data; never present fitted
+estimates as measured without a refit record.
 """
 
 from __future__ import annotations

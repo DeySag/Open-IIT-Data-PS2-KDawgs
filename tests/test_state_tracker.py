@@ -1,8 +1,9 @@
 """Tests for the contact-point state tracker + borrower avoidance latent.
 
-simulation-only: every assertion about model quality is evaluated on synthetic
-data. No test reads ground-truth files except the slow eval test, which goes
-through the eval harness (or skips when simulator outputs are absent).
+Model-quality assertions run on invented fixture data plus a self-contained
+mini generator. No test reads hidden-truth files except the slow eval test,
+which goes through the eval harness (or skips when issued extracts with
+annotations are absent).
 """
 
 from __future__ import annotations
@@ -237,7 +238,7 @@ def test_scorer_eval_protocol_and_registry(tracker):
 
 
 # ---------------------------------------------------------------------------
-# Parameter recovery on a self-contained mini generator (not the simulator)
+# Parameter recovery on a self-contained mini generator
 # ---------------------------------------------------------------------------
 
 
@@ -337,11 +338,11 @@ def test_em_parameter_recovery():
 
 
 # ---------------------------------------------------------------------------
-# Slow eval on simulator outputs (read-only; skips when data absent)
+# Slow eval on issued canonical extracts (read-only; skips when data absent)
 # ---------------------------------------------------------------------------
 
 
-def _find_sim_outputs():
+def _find_eval_outputs():
     cands = []
     for root in (Path("data/dev"), Path("data"), Path(".")):
         if not root.exists():
@@ -354,10 +355,10 @@ def _find_sim_outputs():
 
 
 @pytest.mark.slow
-def test_eval_on_sim_dev():
-    found = _find_sim_outputs()
+def test_eval_on_issued_dev():
+    found = _find_eval_outputs()
     if found is None:
-        pytest.skip("no simulator dev outputs present")
+        pytest.skip("no issued dev outputs present")
     ev_path, gt_path = found
     events = pd.read_parquet(ev_path)
     n = len(events)

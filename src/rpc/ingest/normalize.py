@@ -76,7 +76,7 @@ def hash_address_series(values: pd.Series) -> pd.Series:
 
 
 def passthrough_hash_series(values: pd.Series) -> pd.Series:
-    """Pass through values that are already hashes (simulator output)."""
+    """Pass through values that are already hashes (e.g. CN-provided IDs)."""
     return values.astype("string").fillna("").astype(str)
 
 

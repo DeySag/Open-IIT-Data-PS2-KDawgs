@@ -71,7 +71,8 @@ def ndjson_row(i: int = 0, **overrides) -> dict:
     return row
 
 
-def simulator_row(i: int = 0, **overrides) -> dict:
+def canonical_row(i: int = 0, **overrides) -> dict:
+    """Already-canonical envelope row (as framed from validated InputEvents)."""
     row = {
         "event_id": str(uuid4()),
         "event_type": "dial_attempt",
@@ -136,11 +137,11 @@ def test_disposition_ndjson_nested_mapping(tmp_path: Path):
     assert events.iloc[0]["received_at"] == pd.Timestamp("2024-03-05T08:55:10Z")
 
 
-def test_simulator_parquet_loader(tmp_path: Path):
+def test_api_identity_mapping(tmp_path: Path):
     path = tmp_path / "events.parquet"
-    pd.DataFrame([simulator_row(i) for i in range(5)]).to_parquet(path, index=False)
+    pd.DataFrame([canonical_row(i) for i in range(5)]).to_parquet(path, index=False)
     adapter = make_adapter(tmp_path)
-    res = adapter.ingest(path, "simulator")
+    res = adapter.ingest(path, "api")
     assert res == {"accepted": 5, "duplicate": 0, "rejected": 0, "dirty_marked": 0}
     events = adapter.read_events()
     assert len(events) == 5

@@ -349,19 +349,29 @@ def build_account_context(ctx: dict[str, Any], as_of: datetime) -> Any:
 
 
 def decide_from_ranked(
-    ctx: dict[str, Any], scores: list[RankedContactPoint]
+    ctx: dict[str, Any],
+    scores: list[RankedContactPoint],
+    guard_cfg: dict[str, Any] | None = None,
+    cost_cfg: dict[str, Any] | None = None,
 ) -> Any:
     """Run the real ``decide_full`` decision layer on ranked scores.
 
     Returns the ``DecisionResult`` (decision + suppressions + reason codes).
     Single construction point for ``OutputDecision`` in serving.
+    ``guard_cfg`` lets callers (e.g. the app's configured guardrails engine)
+    govern the run; otherwise decision defaults load from file.
     """
     from src.rpc.decision.actions import decide_full
 
     as_of = ctx.get("as_of")
     if not isinstance(as_of, datetime):
         as_of = datetime.now().astimezone()
-    return decide_full(build_account_context(ctx, as_of), ranked_to_scores(scores, as_of))
+    return decide_full(
+        build_account_context(ctx, as_of),
+        ranked_to_scores(scores, as_of),
+        guard_cfg,
+        cost_cfg,
+    )
 
 
 # ==================== Factory Functions ====================

@@ -1,13 +1,12 @@
 # Makefile for PS2 RPC
 # Deterministic commands for data, train, eval, test
 
-.PHONY: help install data-dev data-full features-dev train-baselines train-models eval smoke serve lint typecheck test clean
+.PHONY: help install data-check features-dev train-baselines train-models eval smoke serve lint typecheck test clean
 
 help:
 	@echo "PS2 RPC - Available commands:"
 	@echo "  install         - Install dependencies"
-	@echo "  data-dev        - Generate dev dataset (~5k borrowers)"
-	@echo "  data-full       - Generate full dataset (~100k borrowers)"
+	@echo "  data-check      - Verify official extracts are present (datasets/, gitignored)"
 	@echo "  train-baselines - Train baseline models"
 	@echo "  train-models    - Train all models"
 	@echo "  eval            - Run evaluation against baselines"
@@ -21,11 +20,10 @@ help:
 install:
 	pip install -e ".[dev]"
 
-data-dev:
-	python -m src.rpc.sim.generate --config configs/sim.yaml --scale dev --output data/dev.parquet
-
-data-full:
-	python -m src.rpc.sim.generate --config configs/sim.yaml --scale full --output data/full.parquet
+data-check:
+	@test -f datasets/dial_attempts.csv || (echo "missing datasets/dial_attempts.csv (gitignored official extracts)" && exit 1)
+	@test -f datasets/accounts.csv || (echo "missing datasets/accounts.csv" && exit 1)
+	@echo "official extracts present (see docs/dataset_audit.md)"
 
 features-dev:
 	python -m src.rpc.features.build --scale dev --out data/features_dev.parquet
@@ -34,7 +32,7 @@ train-baselines:
 	python -m src.rpc.models.train_baselines --data data/dev.parquet --output models/baselines/
 
 train-models:
-	python -m src.rpc.models.train --data data/dev.parquet --config configs/sim.yaml --output models/v0/
+	python -m src.rpc.models.train --data data/dev.parquet --config configs/state_tracker.yaml --output models/v0/
 
 eval:
 	python -m src.rpc.eval.run --config configs/eval.yaml

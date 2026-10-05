@@ -144,7 +144,7 @@ def test_ingest_source_empty_store(tmp_path: Path):
     assert source.max_received() is None
 
 
-def _simulator_frame(n: int = 4) -> pd.DataFrame:
+def _canonical_frame(n: int = 4) -> pd.DataFrame:
     rows = []
     for i in range(n):
         rows.append(
@@ -169,12 +169,12 @@ def _simulator_frame(n: int = 4) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def test_ingest_source_roundtrip_simulator_rows(tmp_path: Path):
-    """Canonical simulator-shaped rows survive store -> source unchanged."""
-    db = str(tmp_path / "sim.duckdb")
+def test_ingest_source_roundtrip_canonical_rows(tmp_path: Path):
+    """Canonical envelope rows survive store -> source unchanged."""
+    db = str(tmp_path / "canon.duckdb")
     adapter = IngestAdapter(IngestConfig(db_path=db))
-    frame = _simulator_frame()
-    res = adapter.ingest(frame, "simulator")
+    frame = _canonical_frame()
+    res = adapter.ingest(frame, "api")
     assert res["accepted"] == 4, res
     source = IngestEventSource(db_path=db)
     visible = source.load_visible_events(pd.Timestamp("2024-01-01T01:00:00Z"))
