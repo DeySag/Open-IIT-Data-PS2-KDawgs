@@ -1,11 +1,12 @@
 # Makefile for PS2 RPC
 # Deterministic commands for data, train, eval, test
 
-.PHONY: help install data-check features train-baselines train-models eval smoke serve lint typecheck test clean
+.PHONY: help install data data-check features train-baselines train-models eval smoke serve lint typecheck test clean
 
 help:
 	@echo "PS2 RPC - Available commands:"
 	@echo "  install         - Install dependencies"
+	@echo "  data            - Ingest all official extracts into data/event_store.duckdb"
 	@echo "  data-check      - Verify official extracts are present (datasets/, gitignored)"
 	@echo "  train-baselines - Train baseline models"
 	@echo "  train-models    - Train all models"
@@ -19,6 +20,9 @@ help:
 
 install:
 	pip install -e ".[dev]"
+
+data:
+	python -m src.rpc.ingest --datasets datasets --db data/event_store.duckdb
 
 data-check:
 	@test -f datasets/dial_attempts.csv || (echo "missing datasets/dial_attempts.csv (gitignored official extracts)" && exit 1)

@@ -80,6 +80,15 @@ CREATE TABLE IF NOT EXISTS watermarks (
     updated_at TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (contact_point_ref, lender_id)
 );
+CREATE TABLE IF NOT EXISTS trace_history (
+    trace_id VARCHAR PRIMARY KEY,
+    account_id VARCHAR NOT NULL,
+    trace_date DATE NOT NULL,
+    trigger_rule VARCHAR NOT NULL,
+    result VARCHAR NOT NULL,
+    new_contact_point_id VARCHAR,
+    cost_inr DOUBLE NOT NULL
+);
 """
 
 
@@ -280,3 +289,48 @@ class EventStore:
         for table in ("events", "dead_letter", "dirty_contact_points", "watermarks"):
             out[table] = int(self.con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
         return out
+
+    # -- trace history (VOI inputs only; never a predictor) ----------------
+
+    def insert_trace_history(self, df: pd.DataFrame) -> tuple[int, int]:
+        """Bulk insert trace outcomes; idempotent on ``trace_id``."""
+        if df.empty:
+            return 0, 0
+        cols = [
+            "trace_id",
+            "account_id",
+            "trace_date",
+            "trigger_rule",
+            "result",
+            "new_contact_point_id",
+            "cost_inr",
+        ]
+        self.con.register("_trace_staged", df[cols].copy())
+        try:
+            dupes = self.con.execute(
+                "SELECT COUNT(*) FROM _trace_staged s WHERE EXISTS "
+                "(SELECT 1 FROM trace_history t WHERE t.trace_id = s.trace_id)"
+            ).fetchone()[0]
+            self.con.execute(
+                "INSERT INTO trace_history SELECT s.* FROM _trace_staged s "
+                "WHERE NOT EXISTS "
+                "(SELECT 1 FROM trace_history t WHERE t.trace_id = s.trace_id)"
+            )
+        finally:
+            self.con.unregister("_trace_staged")
+        return int(len(df) - dupes), int(dupes)
+
+    def read_trace_history(self, account_ids: list[str] | None = None) -> pd.DataFrame:
+        """Read trace outcomes for VOI; never use as a model predictor."""
+        if account_ids:
+            placeholders = ", ".join(["?"] * len(account_ids))
+            return self.con.execute(
+                "SELECT trace_id, account_id, trace_date, trigger_rule, result, "
+                "new_contact_point_id, cost_inr FROM trace_history "
+                f"WHERE account_id IN ({placeholders}) ORDER BY trace_date",
+                account_ids,
+            ).fetchdf()
+        return self.con.execute(
+            "SELECT trace_id, account_id, trace_date, trigger_rule, result, "
+            "new_contact_point_id, cost_inr FROM trace_history ORDER BY trace_date"
+        ).fetchdf()
