@@ -1,7 +1,7 @@
 # Data and models
 data/
 datasets/
-models/
+/models/
 /eval/
 
 # Python
@@ -32,6 +32,9 @@ System Prompt.md
 
 # Uploaded planning workbooks (local only)
 ps2_models_table.xlsx
+
+# CN correspondence (local only)
+docs/ask_cn.md
 
 # Logs
 *.log
