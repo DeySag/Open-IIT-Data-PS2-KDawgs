@@ -1,0 +1,54 @@
+# Field mapping: official field_visits.csv -> canonical field_visit envelope.
+#
+# contact_point_ref = hash(address_id); GPS grid coordinates are NOT mapped
+# (checkin_x/checkin_y are synthetic-grid values, not lat/lon — mapping them
+# into gps_lat/gps_lon would corrupt geographic semantics; audit §7).
+# visit_time = start_ts (IST wall-clock assumption, pending CN confirmation).
+# Borrower identity, lender join, received==occurred as in cn_dial_attempts.yaml.
+#
+# Outcome value mapping (audit §4, CN-confirmable judgments):
+#   locked_premises, met_borrower pass through; met_family -> met_third_party;
+#   no_such_person -> nobody_of_that_name;
+#   neighbour_says_shifted -> nobody_of_that_name (person not there; moved
+#     vs fabricated unresolved — flagged);
+#   address_not_traceable -> address_not_found (findability);
+#   cash_collected -> met_borrower (a payment collected implies contact;
+#     borrower-vs-family ambiguous — flagged for CN confirmation).
+
+source: cn_field_visits
+description: "Official field_visits.csv -> field_visit events"
+format: csv
+
+contact_point:
+  raw_field: address_id
+  kind: id
+
+fields:
+  event_id: {field: visit_id, uuid5: true}
+  event_type: {const: field_visit}
+  lender_id: {field: lender_id}
+  borrower_id: {field: account_id}
+  account_id: {field: account_id}
+  occurred_at: {field: start_ts, format: "%Y-%m-%d %H:%M:%S", tz: Asia/Kolkata}
+  received_at: {field: start_ts, format: "%Y-%m-%d %H:%M:%S", tz: Asia/Kolkata}
+
+payload:
+  outcome:
+    field: outcome
+    map:
+      locked_premises: locked_premises
+      met_borrower: met_borrower
+      met_family: met_third_party
+      no_such_person: nobody_of_that_name
+      neighbour_says_shifted: nobody_of_that_name
+      address_not_traceable: address_not_found
+      cash_collected: met_borrower
+  dwell_seconds: {field: dwell_s, type: int}
+  visit_time: {field: start_ts, format: "%Y-%m-%d %H:%M:%S", tz: Asia/Kolkata}
+  agent_id: {field: agent_id}
+  remarks: {field: remark}
+
+validation:
+  clock_skew_tolerance_seconds: 300
+  sample_rate: 0.01
+  sample_seed: 42

@@ -80,6 +80,17 @@ def passthrough_hash_series(values: pd.Series) -> pd.Series:
     return values.astype("string").fillna("").astype(str)
 
 
+def hash_id_series(values: pd.Series) -> pd.Series:
+    """Hash stable source IDs verbatim (no normalisation).
+
+    For CN-provided identifiers (``phone_id``, ``address_id``) whose raw form
+    carries no PII beyond the link itself: the ID is hashed as-is so the
+    reference is stable, opaque, and independent of display formatting.
+    """
+    s = values.astype("string").fillna("")
+    return _hash_unique(s)
+
+
 def redact_record(record: dict[str, Any], raw_fields: list[str]) -> dict[str, Any]:
     """Return a copy of ``record`` with raw contact-point fields redacted.
 

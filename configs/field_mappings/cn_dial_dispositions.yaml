@@ -1,0 +1,65 @@
+# Field mapping: official dial_attempts.csv -> canonical disposition envelope.
+#
+# Companion to cn_dial_attempts.yaml: same source row, distinct event_id via
+# the ":disposition" uuid5 suffix so dial and disposition events never
+# collide on dedupe. Borrower identity, lender join, timestamps and
+# received==occurred as in cn_dial_attempts.yaml.
+#
+# Disposition value mapping (audit §4, CN-confirmable judgments):
+#   rpc_ptp -> promise_to_pay; rpc_call_back -> callback;
+#   rpc_dispute -> dispute; rpc_refused / rpc_hung_up / rpc_hardship /
+#   rpc_claims_paid -> RPC (contact established; adverse/other outcome).
+#   wrong_number, third_party_contact / third_party_ptp -> third_party,
+#   switched_off, not_reachable map directly.
+# Unmapped (reject as unknown_enum on this companion ONLY; the dial
+# companion still accepts, so no information is lost — network_response
+# in the dial event covers it): no_answer, call_rejected (echo rows),
+# language_barrier (44 rows, no canonical equivalent),
+# invalid_number (88 rows of hard-invalid evidence; the dial event's
+# does_not_exist covers it; recommend an INVALID enum addition).
+
+source: cn_dial_dispositions
+description: "Official dial_attempts.csv -> disposition companion events"
+format: csv
+
+contact_point:
+  raw_field: phone_id
+  kind: id
+
+fields:
+  event_id: {field: attempt_id, uuid5: true, suffix: ":disposition"}
+  event_type: {const: disposition}
+  lender_id: {field: lender_id}
+  borrower_id: {field: account_id}
+  account_id: {field: account_id}
+  occurred_at: {field: attempt_ts, format: "%Y-%m-%d %H:%M:%S", tz: Asia/Kolkata}
+  received_at: {field: attempt_ts, format: "%Y-%m-%d %H:%M:%S", tz: Asia/Kolkata}
+
+payload:
+  disposition:
+    field: disposition
+    map:
+      rpc_ptp: promise_to_pay
+      rpc_call_back: callback
+      rpc_dispute: dispute
+      rpc_refused: RPC
+      rpc_hung_up: RPC
+      rpc_hardship: RPC
+      rpc_claims_paid: RPC
+      wrong_number: wrong_number
+      third_party_contact: third_party
+      third_party_ptp: third_party
+      switched_off: switched_off
+      not_reachable: not_reachable
+  remarks: {field: remark}
+  agent_id: {field: agent_id}
+  channel:
+    field: channel
+    map:
+      tele_agent: telecaller
+      voice_bot: voice_bot
+
+validation:
+  clock_skew_tolerance_seconds: 300
+  sample_rate: 0.01
+  sample_seed: 42

@@ -16,7 +16,7 @@ import duckdb
 import pandas as pd
 
 from src.rpc.ingest import IngestAdapter, ingest, read_events, replay
-from src.rpc.ingest.normalize import hash_phone_series
+from src.rpc.ingest.normalize import hash_id_series, hash_phone_series
 from src.rpc.ingest.store import EventStore, IngestConfig
 
 T0_MS = 1704067200000  # 2024-01-01T00:00:00Z
@@ -405,3 +405,216 @@ def test_module_functions_share_default_contract(tmp_path: Path, monkeypatch):
         assert store.counts()["events"] == 1
     finally:
         store.close()
+
+
+# ---------------------------------------------------------------------------
+# Official-extract mappings (fixtures mirror the issued schema; the lender_id
+# column stands in for the accounts join the ingest flow performs)
+# ---------------------------------------------------------------------------
+
+
+def cn_attempt(i: int = 0, **overrides) -> dict:
+    row = {
+        "attempt_id": f"AT{i:07d}",
+        "account_id": f"AC{i:06d}",
+        "phone_id": f"PH{i:06d}",
+        "attempt_ts": "2026-04-01 09:48:09",
+        "channel": "tele_agent",
+        "agent_id": "TA001",
+        "dialling_arm": "rule_based",
+        "selection_propensity": 1.0,
+        "network_response": "answered",
+        "ring_duration_s": 6,
+        "talk_duration_s": 36,
+        "hangup_by": "agent",
+        "disposition": "rpc_ptp",
+        "remark": "will pay Friday",
+        "ptp_id": None,
+        "has_transcript": False,
+        "lender_id": "L01",
+    }
+    row.update(overrides)
+    return row
+
+
+def test_cn_dial_attempt_mapping(tmp_path: Path):
+    adapter = make_adapter(tmp_path)
+    res = adapter.ingest(pd.DataFrame([cn_attempt()]), "cn_dial_attempts")
+    assert res == {"accepted": 1, "duplicate": 0, "rejected": 0, "dirty_marked": 0}
+    events = adapter.read_events()
+    row = events.iloc[0]
+    assert row["event_type"] == "dial_attempt"
+    assert row["borrower_id"] == row["account_id"] == "AC000000"  # Q1: borrower=account
+    assert row["contact_point_ref"] == hash_id_series(pd.Series(["PH000000"])).iloc[0]
+    payload = json.loads(row["payload"])
+    assert payload["network_response"] == "answered"
+    assert payload["channel"] == "telecaller"
+    assert payload["ring_seconds"] == 6.0
+    # talk_duration_s / hangup_by / arm / propensity have no envelope fields.
+    assert "talk_duration_s" not in payload
+
+
+def test_cn_disposition_companion_mapping(tmp_path: Path):
+    adapter = make_adapter(tmp_path)
+    frame = pd.DataFrame([cn_attempt(), cn_attempt(1, disposition="no_answer")])
+    res = adapter.ingest(frame, "cn_dial_dispositions")
+    assert res["accepted"] == 1 and res["rejected"] == 1
+    assert _dead_reasons(tmp_path) == ["unknown_enum"]  # echo row, zero info loss
+    events = adapter.read_events()
+    assert json.loads(events.iloc[0]["payload"])["disposition"] == "promise_to_pay"
+
+
+def test_cn_companion_ids_distinct_from_dial_ids(tmp_path: Path):
+    adapter = make_adapter(tmp_path)
+    frame = pd.DataFrame([cn_attempt()])
+    adapter.ingest(frame, "cn_dial_attempts")
+    adapter.ingest(frame, "cn_dial_dispositions")
+    events = adapter.read_events()
+    assert len(events) == 2
+    assert events["event_id"].nunique() == 2  # suffix keeps companions distinct
+
+
+def test_cn_phones_mapping(tmp_path: Path):
+    adapter = make_adapter(tmp_path)
+    frame = pd.DataFrame(
+        [
+            {
+                "phone_id": "PH000001",
+                "account_id": "AC000001",
+                "source": "reference",
+                "relation_recorded": "reference_spouse",
+                "added_date": "2026-05-02",
+                "phone_masked": "XXXXXX1234",
+                "priority_slot": "0",
+                "lender_id": "L01",
+            }
+        ]
+    )
+    res = adapter.ingest(frame, "cn_phones")
+    assert res["accepted"] == 1, res
+    row = adapter.read_events().iloc[0]
+    assert row["event_type"] == "contact_point_update"
+    assert row["contact_point_ref"] == hash_id_series(pd.Series(["PH000001"])).iloc[0]
+    payload = json.loads(row["payload"])
+    assert payload["source"] == "later_update"  # reference/employer closest fit
+    assert payload["contact_type"] == "phone"
+    assert payload["contact_value"] == "PH000001"  # stable id, never raw digits
+    assert payload["is_primary"] is True
+    assert "XXXXXX1234" not in adapter.read_events().to_string()
+
+
+def test_cn_phones_event_id_keys_on_phone_and_account(tmp_path: Path):
+    from src.rpc.ingest.mapping import apply_mapping, load_mapping
+
+    mapping = load_mapping("cn_phones")
+    assert mapping is not None
+    base = {
+        "phone_id": "PH000546",
+        "account_id": "AC000057",
+        "source": "kyc_origination",
+        "relation_recorded": "self",
+        "added_date": "2026-04-01",
+        "phone_masked": "XXXXXX0492",
+        "priority_slot": "1",
+        "lender_id": "L01",
+    }
+    same_phone_other_account = dict(base, account_id="AC000058")
+    a = apply_mapping(pd.DataFrame([base]), mapping, "cn_phones")
+    b = apply_mapping(pd.DataFrame([same_phone_other_account]), mapping, "cn_phones")
+    assert a["_reason"].isna().all() and b["_reason"].isna().all()
+    # Shared numbers keep one ref (graph signal) but distinct update events.
+    assert a["contact_point_ref"].iloc[0] == b["contact_point_ref"].iloc[0]
+    assert a["event_id"].iloc[0] != b["event_id"].iloc[0]
+    # Deterministic: same input twice -> same id.
+    c = apply_mapping(pd.DataFrame([base]), mapping, "cn_phones")
+    assert c["event_id"].iloc[0] == a["event_id"].iloc[0]
+
+
+def test_cn_addresses_mapping(tmp_path: Path):
+    adapter = make_adapter(tmp_path)
+    frame = pd.DataFrame(
+        [
+            {
+                "address_id": "AD000001",
+                "account_id": "AC000001",
+                "address_type": "residence",
+                "source": "kyc_origination",
+                "added_date": "2026-04-01",
+                "town_id": "T1",
+                "address_text": "H.No. 1, Some Street, Town - 100001",
+                "lender_id": "L02",
+            }
+        ]
+    )
+    res = adapter.ingest(frame, "cn_addresses")
+    assert res["accepted"] == 1, res
+    row = adapter.read_events().iloc[0]
+    payload = json.loads(row["payload"])
+    assert payload["contact_type"] == "address"
+    assert payload["contact_value"] == "AD000001"
+    dumped = adapter.read_events().to_string()
+    assert "H.No. 1" not in dumped  # raw address text never stored
+    assert "Town" not in dumped
+
+
+def test_cn_payments_mapping(tmp_path: Path):
+    adapter = make_adapter(tmp_path)
+    frame = pd.DataFrame(
+        [
+            {
+                "payment_id": "PY000001",
+                "account_id": "AC000001",
+                "payment_ts": "2026-05-11 20:03:23",
+                "amount": 500.0,
+                "channel": "upi_link",
+                "lender_id": "L03",
+            }
+        ]
+    )
+    res = adapter.ingest(frame, "cn_payments")
+    assert res["accepted"] == 1, res
+    row = adapter.read_events().iloc[0]
+    assert row["event_type"] == "payment"
+    assert row["contact_point_ref"] == hash_id_series(pd.Series(["AC000001"])).iloc[0]
+    payload = json.loads(row["payload"])
+    assert payload["amount"] == 500.0
+    assert payload["payment_mode"] == "upi_link"
+    assert "received_at" in payload
+
+
+def test_cn_field_visits_mapping(tmp_path: Path):
+    adapter = make_adapter(tmp_path)
+    frame = pd.DataFrame(
+        [
+            {
+                "visit_id": "VS000001",
+                "account_id": "AC000001",
+                "address_id": "AD000001",
+                "agent_id": "FA001",
+                "visit_date": "2026-05-01",
+                "start_ts": "2026-05-01 10:21:26",
+                "checkin_ts": "2026-05-01 11:00:13",
+                "checkin_x": 2325.8,
+                "checkin_y": -773.7,
+                "gps_accuracy_m": 4.0,
+                "dwell_s": 64,
+                "outcome": "met_family",
+                "ptp_id": None,
+                "remark": "family met",
+                "photo_hash": "ph0082",
+                "lender_id": "L01",
+            }
+        ]
+    )
+    res = adapter.ingest(frame, "cn_field_visits")
+    assert res["accepted"] == 1, res
+    row = adapter.read_events().iloc[0]
+    assert row["event_type"] == "field_visit"
+    payload = json.loads(row["payload"])
+    assert payload["outcome"] == "met_third_party"
+    assert payload["dwell_seconds"] == 64
+    assert payload["agent_id"] == "FA001"
+    assert "visit_time" in payload
+    # Grid GPS coords must not land in lat/lon fields.
+    assert "gps_lat" not in payload and "gps_lon" not in payload
+    assert "2325.8" not in adapter.read_events().to_string()

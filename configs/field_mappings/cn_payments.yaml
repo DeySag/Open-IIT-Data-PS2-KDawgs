@@ -1,0 +1,37 @@
+# Field mapping: official payments.csv -> canonical payment envelope.
+#
+# Payments are account-level (no phone link in the extracts). contact_point_ref
+# is hash(account_id): a deterministic pseudo-contact that never collides with
+# a real contact ref; payment-to-contact linkage stays borrower-level
+# downstream (audit §5). lender_id must be joined from accounts.csv before
+# ingest (this table is account-keyed only). occurred_at = payment_ts
+# (IST wall-clock assumption, pending CN confirmation); received_at equals
+# occurred_at (single timestamp per event). payment channel strings pass
+# through as payment_mode (free-form canonical field).
+
+source: cn_payments
+description: "Official payments.csv -> payment events"
+format: csv
+
+contact_point:
+  raw_field: account_id
+  kind: id
+
+fields:
+  event_id: {field: payment_id, uuid5: true}
+  event_type: {const: payment}
+  lender_id: {field: lender_id}
+  borrower_id: {field: account_id}
+  account_id: {field: account_id}
+  occurred_at: {field: payment_ts, format: "%Y-%m-%d %H:%M:%S", tz: Asia/Kolkata}
+  received_at: {field: payment_ts, format: "%Y-%m-%d %H:%M:%S", tz: Asia/Kolkata}
+
+payload:
+  amount: {field: amount, type: float}
+  payment_mode: {field: channel}
+  received_at: {field: payment_ts, format: "%Y-%m-%d %H:%M:%S", tz: Asia/Kolkata}
+
+validation:
+  clock_skew_tolerance_seconds: 300
+  sample_rate: 0.01
+  sample_seed: 42

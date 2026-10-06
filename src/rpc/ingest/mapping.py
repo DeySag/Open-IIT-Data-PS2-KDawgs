@@ -20,6 +20,7 @@ import yaml
 from src.rpc.contracts import Disposition, EventType, NetworkResponse
 from src.rpc.ingest.normalize import (
     hash_address_series,
+    hash_id_series,
     hash_phone_series,
     passthrough_hash_series,
 )
@@ -153,9 +154,18 @@ def parse_timestamp_column(values: pd.Series, fmt: str, tz: str | None) -> pd.Se
     return parsed.dt.tz_convert("UTC")
 
 
-def _canonical_event_id(values: pd.Series, source: str, derive: bool) -> pd.Series:
-    """UUID strings; unparseable (or derive=True) -> deterministic uuid5."""
+def _canonical_event_id(
+    values: pd.Series, source: str, derive: bool, suffix: str = ""
+) -> pd.Series:
+    """UUID strings; unparseable (or derive=True) -> deterministic uuid5.
+
+    ``suffix`` disambiguates companion events derived from the same raw id
+    (e.g. dial vs disposition rows from one attempt row).
+    """
     as_str = _as_string(values)
+    if suffix:
+        # String-dtype concat propagates NA, so absent ids stay absent.
+        as_str = as_str + suffix
     if derive:
         return _map_unique(as_str, lambda x: _derive_uuid(x, source))
     # Fast vectorised path: 32-hex source ids hyphenated in bulk.
@@ -235,9 +245,24 @@ def _map_scalar_fields(
                 col = _as_string(col)
                 unknown_enum = unknown_enum | (_is_present(col) & out[canonical].isna())
     # event_id derivation (uuid5 when the source id is not a UUID).
+    # Supports {field, uuid5, suffix?} and {fields: [...], uuid5, suffix?};
+    # the latter joins present values with "|" (any missing part -> missing).
     id_spec = _resolve_spec(fields.get("event_id", {}))
+    if "fields" in id_spec:
+        parts = [extract_column(df, f) for f in id_spec["fields"]]
+        if any(col is _MISSING for col in parts):
+            id_values: pd.Series = pd.Series(pd.NA, index=df.index, dtype="string")
+        else:
+            id_values = _as_string(parts[0])
+            for col in parts[1:]:
+                id_values = id_values + "|" + _as_string(col)
+    else:
+        id_values = out["event_id"]
     out["event_id"] = _canonical_event_id(
-        out["event_id"], source, derive=bool(id_spec.get("uuid5", False))
+        id_values,
+        source,
+        derive=bool(id_spec.get("uuid5", False)),
+        suffix=str(id_spec.get("suffix", "")),
     ).astype("string")
     return out, unknown_enum
 
@@ -271,6 +296,8 @@ def _map_contact(df: pd.DataFrame, mapping: dict[str, Any]) -> pd.Series:
         ref = hash_phone_series(raw_col).astype("string")
     elif kind == "address":
         ref = hash_address_series(raw_col).astype("string")
+    elif kind == "id":
+        ref = hash_id_series(raw_col).astype("string")
     elif kind == "hash_passthrough":
         ref = passthrough_hash_series(raw_col).astype("string")
     else:
@@ -374,6 +401,10 @@ def _map_payload_key(df: pd.DataFrame, canonical: pd.DataFrame, spec: dict[str, 
     if spec.get("type") in ("float", "int"):
         num = pd.to_numeric(col, errors="coerce")
         return num if spec["type"] == "float" else num.astype("Int64")
+    if "format" in spec:
+        # Timestamp-valued payload key: parse to UTC, emit ISO-8601 strings.
+        parsed = parse_timestamp_column(col, str(spec["format"]), spec.get("tz"))
+        return parsed.map(lambda v: v.isoformat() if not pd.isna(v) else None)
     return col
 
 

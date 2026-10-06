@@ -1,0 +1,61 @@
+# Field mapping: official phones.csv -> contact_point_update envelope.
+#
+# One row per (account, phone) linkage. contact_point_ref = hash(phone_id):
+# numbers arrive masked (XXXXXX1234), so number normalization is moot and
+# the stable CN id is the reference (audit §7). contact_value carries the
+# phone_id itself (zero PII; the masked number is never stored).
+# Borrower identity, lender join, timestamps as in cn_dial_attempts.yaml.
+# occurred_at = added_date (linkage birth; left-truncation point).
+#
+# Source value mapping (canonical sources are KYC / later_update / bureau /
+# borrower_on_call / skip_trace): kyc_origination -> KYC, borrower_update ->
+# borrower_on_call, bureau -> bureau, skip_trace -> skip_trace,
+# reference / employer -> later_update (closest fit: non-KYC later-provided
+# numbers; flagged for CN confirmation — these carry 30-38% third-party
+# rates, so mis-mapping them would hide third-party signal).
+# is_primary from priority_slot (0 == primary).
+
+source: cn_phones
+description: "Official phones.csv -> contact_point_update events"
+format: csv
+
+contact_point:
+  raw_field: phone_id
+  kind: id
+
+fields:
+  event_id: {fields: [phone_id, account_id], uuid5: true}
+  event_type: {const: contact_point_update}
+  lender_id: {field: lender_id}
+  borrower_id: {field: account_id}
+  account_id: {field: account_id}
+  occurred_at: {field: added_date, format: "%Y-%m-%d", tz: Asia/Kolkata}
+  received_at: {field: added_date, format: "%Y-%m-%d", tz: Asia/Kolkata}
+
+payload:
+  source:
+    field: source
+    map:
+      kyc_origination: KYC
+      borrower_update: borrower_on_call
+      bureau: bureau
+      skip_trace: skip_trace
+      reference: later_update
+      employer: later_update
+  contact_value: {field: phone_id}
+  contact_type: {const: phone}
+  is_primary:
+    # String keys: CSV loads every column as strings. Quoted deliberately.
+    field: priority_slot
+    map:
+      "0": true
+      "1": false
+      "2": false
+      "3": false
+      "4": false
+      "5": false
+
+validation:
+  clock_skew_tolerance_seconds: 300
+  sample_rate: 0.01
+  sample_seed: 42

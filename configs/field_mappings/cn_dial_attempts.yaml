@@ -1,0 +1,55 @@
+# Field mapping: official dial_attempts.csv -> canonical dial_attempt envelope.
+#
+# One source row yields one dial_attempt event here; the companion
+# disposition event comes from cn_dial_dispositions.yaml over the same file.
+# Borrower identity: no borrower_id exists in the extracts, so borrower_id
+# maps from account_id (1 account = 1 borrower assumption, audit §2).
+# lender_id must be joined from accounts.csv before ingest (this table is
+# account-keyed only). received_at == occurred_at: single timestamp per
+# event (audit §3); late-event handling stays synthetic-test-only.
+# Timestamps are naive wall-clock, localized to Asia/Kolkata (audit §3,
+# pending CN confirmation).
+#
+# Spec forms: {field}, {const}, {field, map}, {field, type, default},
+# {field, uuid5, suffix?}, {fields: [...], uuid5, suffix?},
+# {contact_ref: true}, timestamps {field, format, tz}.
+
+source: cn_dial_attempts
+description: "Official dial_attempts.csv -> dial_attempt events"
+format: csv
+
+contact_point:
+  raw_field: phone_id
+  kind: id
+
+fields:
+  event_id: {field: attempt_id, uuid5: true}
+  event_type: {const: dial_attempt}
+  lender_id: {field: lender_id}
+  borrower_id: {field: account_id}
+  account_id: {field: account_id}
+  occurred_at: {field: attempt_ts, format: "%Y-%m-%d %H:%M:%S", tz: Asia/Kolkata}
+  received_at: {field: attempt_ts, format: "%Y-%m-%d %H:%M:%S", tz: Asia/Kolkata}
+
+payload:
+  network_response:
+    field: network_response
+    map:
+      ring_no_answer: no_answer
+      busy_rejected: busy
+      not_reachable: not_reachable
+      switched_off: switched_off
+      answered: answered
+      number_does_not_exist: does_not_exist
+  ring_seconds: {field: ring_duration_s, type: float}
+  dialled_number: {contact_ref: true}
+  channel:
+    field: channel
+    map:
+      tele_agent: telecaller
+      voice_bot: voice_bot
+
+validation:
+  clock_skew_tolerance_seconds: 300
+  sample_rate: 0.01
+  sample_seed: 42

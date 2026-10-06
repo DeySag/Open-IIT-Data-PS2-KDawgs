@@ -38,16 +38,26 @@ borrower universes derived from events until dedicated tables land).
 
 | source | format | description |
 |---|---|---|
-| `cn_dialer_csv` | CSV | test-format dialer: renamed columns, epoch-ms IST, own result codes (`ANS`, `SWOFF`, ...) — adapter test fixture, not CN data |
-| `cn_disposition_ndjson` | NDJSON | test-format dispositions: nested fields, `%d-%m-%Y %H:%M:%S` IST + ISO+05:30, own outcome codes (`PTP`, `WN`, ...) — adapter test fixture, not CN data |
+| `cn_dialer_csv` | CSV | test-format dialer (adapter conformance fixture, not CN data) |
+| `cn_disposition_ndjson` | NDJSON | test-format dispositions (adapter conformance fixture, not CN data) |
 | `api` | DataFrame | identity mapping for validated `InputEvent`s from the serving layer |
+| `cn_dial_attempts` | CSV | official `dial_attempts.csv` → `dial_attempt` events |
+| `cn_dial_dispositions` | CSV | official `dial_attempts.csv` → `disposition` companions (suffixed ids) |
+| `cn_phones` | CSV | official `phones.csv` → `contact_point_update` events |
+| `cn_addresses` | CSV | official `addresses.csv` → `contact_point_update` events |
+| `cn_payments` | CSV | official `payments.csv` → `payment` events |
+| `cn_field_visits` | CSV | official `field_visits.csv` → `field_visit` events |
 
 Spec forms: `key: column`, `{field: a.b.c}` (nested), `{const: v}`,
 `{field, map: {...}}` (unmapped values reject the row as `unknown_enum`),
 `{field, format: epoch_ms|epoch_s|iso|<strptime>, tz: ...}`,
 `{field, type: float|int}`, `{field, uuid5: true}` (deterministic UUID for
-non-UUID source ids), `{contact_ref: true}` (hashed ref into the payload).
-Contact points: `{raw_field, kind: phone|address|hash_passthrough}`.
+non-UUID source ids; optional `suffix` disambiguates companion events from
+one row, `fields: [...]` derives from joined values), `{contact_ref: true}`
+(hashed ref into the payload). Timestamp-valued payload keys accept
+`{field, format, tz}` like envelope timestamps.
+Contact points: `{raw_field, kind: phone|address|id|hash_passthrough}`
+(`id` hashes stable source IDs verbatim, no normalisation).
 Per-file knobs under `validation:`: `clock_skew_tolerance_seconds` (default 300),
 `sample_rate` (default 0.01), `sample_seed`.
 

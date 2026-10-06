@@ -1,0 +1,40 @@
+# Field mapping: official addresses.csv -> contact_point_update envelope.
+#
+# contact_point_ref = hash(address_id); contact_value carries the
+# address_id itself — address_text (raw PII) is never stored (audit §7).
+# town_id / address_type ride along only as future mapping material, not
+# mapped today. Borrower identity, lender join, timestamps as in
+# cn_dial_attempts.yaml; occurred_at = added_date (linkage birth).
+# Source values here are only kyc_origination / skip_trace.
+
+source: cn_addresses
+description: "Official addresses.csv -> contact_point_update events"
+format: csv
+
+contact_point:
+  raw_field: address_id
+  kind: id
+
+fields:
+  event_id: {fields: [address_id, account_id], uuid5: true}
+  event_type: {const: contact_point_update}
+  lender_id: {field: lender_id}
+  borrower_id: {field: account_id}
+  account_id: {field: account_id}
+  occurred_at: {field: added_date, format: "%Y-%m-%d", tz: Asia/Kolkata}
+  received_at: {field: added_date, format: "%Y-%m-%d", tz: Asia/Kolkata}
+
+payload:
+  source:
+    field: source
+    map:
+      kyc_origination: KYC
+      skip_trace: skip_trace
+  contact_value: {field: address_id}
+  contact_type: {const: address}
+  is_primary: {const: false}
+
+validation:
+  clock_skew_tolerance_seconds: 300
+  sample_rate: 0.01
+  sample_seed: 42
