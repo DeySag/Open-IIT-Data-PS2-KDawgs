@@ -1,4 +1,4 @@
-"""Observed labels for model training (simulation-only).
+"""Observed labels for model training.
 
 IMPORTANT: this module is standalone. It is never imported by
 ``src.rpc.features.features`` or any other feature code, so no future

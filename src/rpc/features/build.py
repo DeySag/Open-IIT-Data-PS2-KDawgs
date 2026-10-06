@@ -1,4 +1,4 @@
-"""CLI: build point-in-time feature snapshots (simulation-only).
+"""CLI: build point-in-time feature snapshots.
 
 Examples:
     python -m src.rpc.features.build --scale dev --as-of 2026-09-01
@@ -21,7 +21,7 @@ from src.rpc.features.spec import FEATURES_DOC_PATH, update_features_doc
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Build RPC feature snapshots (simulation-only).")
+    p = argparse.ArgumentParser(description="Build RPC feature snapshots.")
     p.add_argument("--scale", choices=["dev", "full"], default="dev")
     p.add_argument("--data-dir", default="data",
                    help="Directory with events/borrowers/contact_points.parquet")

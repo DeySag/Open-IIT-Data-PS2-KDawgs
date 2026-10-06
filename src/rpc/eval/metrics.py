@@ -141,7 +141,7 @@ def rpc_per_1000(y_ranked: np.ndarray | pd.Series, top_n: int = 1000) -> float:
 
 def wasted_attempts(
     events: pd.DataFrame,
-    oracle_dead_refs: set[str],
+    dead_refs: set[str],
     action_times: pd.DataFrame | None = None,
     action_col: str = "first_action_at",
 ) -> pd.DataFrame:
@@ -152,7 +152,7 @@ def wasted_attempts(
     """
     ev = events.copy()
     ev["occurred_at"] = pd.to_datetime(ev["occurred_at"], utc=True)
-    dead = ev[ev["contact_point_ref"].isin(oracle_dead_refs)].copy()
+    dead = ev[ev["contact_point_ref"].isin(dead_refs)].copy()
     if action_times is not None and not action_times.empty:
         at = action_times.set_index("contact_point_ref")[action_col]
         dead["cutoff"] = dead["contact_point_ref"].map(at)
@@ -232,7 +232,6 @@ def avoiding_vs_invalid(
 
 def cross_line_subset(
     events: pd.DataFrame,
-    oracle: pd.DataFrame,
     rpc_responses: tuple[str, ...] = ("answered",),
 ) -> pd.DataFrame:
     """Borrower has >=2 lines and an RPC observed on one line while another stayed silent.

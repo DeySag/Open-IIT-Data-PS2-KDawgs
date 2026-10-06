@@ -1,6 +1,6 @@
 """End-to-end smoke test: event in, decision out.
 
-Posts a small batch of synthetic events, then exercises the
+Posts a small batch of test events, then exercises the
 decision, dial list, trace queue and suppression endpoints.
 Passes with the in-memory stubs and later with the real
 modules without code changes.
@@ -8,7 +8,7 @@ modules without code changes.
 ``run_real_chain_smoke_test`` goes further: it fits the real state tracker
 on the posted events and serves decisions through the real ``decide_full``
 layer, proving the true pipeline (not just the stubs) runs end to end.
-All data below is synthetic and invented for this test.
+All data below are inline test fixtures for this test.
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ def run_smoke_test() -> None:
     assert "model_version" in health or "version" in health
     print(f"  health: {health['status']} staleness={health['staleness_state']}")
 
-    # 2. Post a small batch of synthetic events
+    # 2. Post a small batch of test events
     events = [
         _event(
             EventType.DIAL_ATTEMPT,

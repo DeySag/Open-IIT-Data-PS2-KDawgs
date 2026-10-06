@@ -1,6 +1,6 @@
 """Mapping-driven ingestion adapter + event-store writer.
 
-SIMULATION-ONLY pipeline code. Public API::
+Mapping-driven ingestion adapter + event-store writer. Public API::
 
     ingest(batch_or_path, source) -> {"accepted", "duplicate", "rejected", "dirty_marked"}
     read_events(received_before=None, event_types=None, lender_id=None,

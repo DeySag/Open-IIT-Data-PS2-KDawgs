@@ -2,7 +2,7 @@
 
 Proves the pipeline is one connected system, not adjacent modules:
 ingest store -> features source -> models -> decision -> serve -> eval.
-All fixtures below are synthetic and invented for tests; nothing is real data.
+All fixtures below are inline test fixtures; nothing is real data.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Baseline (b): account-level GBM contactability score (simulation-only).
+"""Baseline (b): account-level GBM contactability score.
 
 Aggregates per-contact-point PIT features to account level, fits one
 LightGBM, and assigns every contact point its account's score. No state

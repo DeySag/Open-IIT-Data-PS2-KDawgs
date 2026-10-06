@@ -1,10 +1,11 @@
-# Field mapping: fake CN disposition NDJSON -> canonical InputEvent envelope.
-# SIMULATION-ONLY: this file describes a fictitious CN disposition feed used for
-# testing the adapter. Field layout, codes and timestamp formats are invented.
+# Field mapping: disposition NDJSON -> canonical InputEvent envelope.
+# Adapter conformance fixture: exercises nested fields, custom timestamp
+# formats with source timezone, and value maps. Field layout, codes and
+# timestamp formats are fixture-defined for adapter contract tests.
 # Nested source fields use dotted paths (e.g. "meta.id").
 
 source: cn_disposition_ndjson
-description: "SIMULATION-ONLY fake CN disposition feed (NDJSON, nested, IST wall-clock)"
+description: "Adapter conformance fixture: disposition feed (NDJSON, nested, IST wall-clock)"
 format: ndjson
 
 contact_point:

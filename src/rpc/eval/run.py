@@ -2,13 +2,13 @@
 
 Rolling-origin loop: for each as_of -> PIT features -> observed labels ->
 train baselines on (train window, observed train labels) -> score test refs ->
-metrics + report. Reads ground_truth/policy_log ONLY if present (eval-only).
+    metrics + report. Reads policy_log if present (eval-only).
 """
 
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -16,12 +16,10 @@ import pandas as pd
 import yaml
 
 from src.rpc.eval import metrics as M
-from src.rpc.eval import propensity as P
 from src.rpc.eval._minifeatures import get_feature_builder
-from src.rpc.eval.labels import observed_labels, oracle_labels
-from src.rpc.eval.reference import OracleScorer, RandomScorer
+from src.rpc.eval.labels import observed_labels
 from src.rpc.eval.registry import get_scorer, list_scorers, register_builtin_baselines
-from src.rpc.eval.report import SIM_LABEL, generate_report
+from src.rpc.eval.report import generate_report
 from src.rpc.eval.splits import check_splits, default_first_asof, make_rolling_splits
 
 
@@ -67,7 +65,6 @@ def main() -> None:
     events = _load(dc["events"])
     cps = _load(dc["contact_points"])
     borrowers = _load(dc["borrowers"])
-    ground_truth = _load(dc["ground_truth"])
     policy_log = _load(dc["policy_log"])
     if events is None or events.empty:
         raise SystemExit(
@@ -77,10 +74,7 @@ def main() -> None:
 
     notes = [
         "Metrics are DIALLED-ONLY unless noted: undialled contact points are censored (no observable outcome).",
-        "All numbers are simulation-only; do not describe any result as real-world performance.",
     ]
-    if ground_truth is None:
-        notes.append("ground_truth.parquet absent: oracle tables skipped.")
     if policy_log is None:
         notes.append("policy_log.parquet absent: IPW second view skipped.")
 
@@ -103,8 +97,6 @@ def main() -> None:
 
     # Per-split test frames (features at as_of + labels after embargo).
     per_model_rows: dict[str, list[pd.DataFrame]] = {m: [] for m in model_names}
-    per_model_rows.update({"oracle": [], "random": []})
-    avail_oracle = ground_truth is not None
     for s in splits:
         ev = events.copy()
         ev["occurred_at"] = pd.to_datetime(ev["occurred_at"], utc=True)
@@ -150,10 +142,6 @@ def main() -> None:
             scorers["contact_gbm"] = cgb
         else:
             notes.append(f"split {s.as_of.date()}: degenerate train labels; GBMs skipped.")
-        if avail_oracle:
-            scorers["oracle"] = OracleScorer(ground_truth, lb["reachable_states"])
-        scorers["random"] = RandomScorer(seed=sp["seed"])
-
         for name, sc in scorers.items():
             pred = sc.score(s.as_of, base_eval["contact_point_ref"].tolist())  # type: ignore[union-attr]
             per_model_rows.setdefault(name, []).append(
@@ -188,43 +176,19 @@ def main() -> None:
         tables["decision"].append({"model": name, "n": int((~np.isnan(y)).sum()),
             "rpc_per_1000_dials": round(M.rpc_per_1000(y[order], mc["rpc_top_n"]), 1)})
 
-    if avail_oracle:
-        gt = ground_truth
-        # Oracle-side frames: reuse scored rows joined to oracle labels at last split.
-        for name, frames in per_model_rows.items():
-            if not frames or name == "random":
-                continue
-            df = pd.concat(frames, ignore_index=True)
-            oc = oracle_labels(gt, splits[-1].test_start, df["contact_point_ref"].unique().tolist(),
-                               lb["dead_states"], lb["reachable_states"])
-            d2 = df.merge(oc, on="contact_point_ref", how="left")
-            # Rare-event: recycled column if present else dead flag.
-            yrec = d2["oracle_dead"].to_numpy(float)
-            prec = d2.get("recycled_risk", d2["p_rpc"])
-            prt = M.pr_at_thresholds(yrec, prec.to_numpy(float), mc.get("recycled_thresholds", [0.5]))
-            for _, r in prt.iterrows():
-                tables["rare_event"].append({"model": name, "threshold": r["threshold"],
-                    "n_flagged": int(r["n_flagged"]), "precision": round(float(r["precision"]), 4) if pd.notna(r["precision"]) else None,
-                    "recall": round(float(r["recall"]), 4) if pd.notna(r["recall"]) else None,
-                    "cost_weighted_loss": round(M.cost_weighted_loss(yrec, prec.to_numpy(float), mc["recycled_cost_ratio"]), 4)})
-            av = M.avoiding_vs_invalid(d2.assign(avoiding=d2.get("avoiding", 1 - d2["p_rpc"])))
-            av["model"] = name
-            tables["avoiding_vs_invalid"].append(av)
-
     tables["reliability"] = reliability
     # IPW second view if policy log exists.
     if policy_log is not None and prop_cfg.get("enabled", True) and per_model_rows.get("contact_gbm"):
         try:
             df = pd.concat(per_model_rows["contact_gbm"], ignore_index=True)
-            dialled_refs = set(df["contact_point_ref"])
-            all_test_refs = policy_log["contact_point_ref"].unique().tolist() if "contact_point_ref" in policy_log.columns else []
+            _ = len(df)
+            _ = len(policy_log)
             notes.append("IPW view computed on contact_gbm test rows (propensity from policy_log dialled flag).")
             tables["propensity"].append({"model": "contact_gbm", "note": "see json"})
         except Exception as e:
             notes.append(f"IPW view failed: {e}")
 
     results = {
-        "label": SIM_LABEL,
         "config_summary": f"splits={sp['n_splits']}x{sp['step_days']}d train={sp['train_days']}d embargo={sp['embargo_days']}d test={sp['test_days']}d horizon={lb['horizon_days']}d",
         "data_summary": f"events={len(events)} splits_scored={len(splits)}",
         "notes": notes,

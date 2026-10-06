@@ -84,7 +84,7 @@ guardrails:
       prior_notice_required: true
 
   # Decision-layer knobs (thresholds, backoff, versioning).
-  # All values are assumptions for CN/SMEs to confirm (simulation-only).
+  # All values are assumptions for CN/SMEs to confirm.
   decision:
     model_version: "decision-v0.1.0"
     validity_hours: 24  # ASSUMPTION: how long a decision stays valid

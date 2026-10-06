@@ -1,6 +1,7 @@
-# Field mapping: fake CN dialer CSV -> canonical InputEvent envelope.
-# SIMULATION-ONLY: this file describes a fictitious CN dialer extract used for
-# testing the adapter. Column names, codes and formats are invented.
+# Field mapping: dialer CSV -> canonical InputEvent envelope.
+# Adapter conformance fixture: exercises renamed columns, epoch-ms
+# timestamps with source timezone, and value maps. Column names, codes
+# and formats are fixture-defined for adapter contract tests.
 #
 # Spec forms for `fields:` / `payload:` entries:
 #   key: source_column            # direct reference (dotted paths for nested JSON)
@@ -15,7 +16,7 @@
 # event_id: {field: path, uuid5: true} derives a deterministic UUID from the raw id.
 
 source: cn_dialer_csv
-description: "SIMULATION-ONLY fake CN dialer extract (CSV, IST epoch-ms, own result codes)"
+description: "Adapter conformance fixture: dialer extract (CSV, IST epoch-ms, own result codes)"
 format: csv
 
 contact_point:

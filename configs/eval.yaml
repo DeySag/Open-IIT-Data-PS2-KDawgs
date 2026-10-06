@@ -1,4 +1,4 @@
-# Evaluation harness configuration (simulation-only).
+# Evaluation harness configuration.
 # All values are assumptions; tune here, never in code.
 # Dev horizon is 30 days -> keep windows small and configurable.
 
@@ -14,8 +14,6 @@ labels:
   horizon_days: 7       # rpc_next_7d window after as_of
   rpc_network_responses: ["answered"]   # dial_attempt responses counted as observed contact (proxy for RPC; confirm code set against issued extracts)
   rpc_dispositions: ["RPC", "promise_to_pay", "callback"]  # disposition values counted as observed RPC
-  dead_states: ["recycled", "invalid", "switched_off_long"]  # truly dead lines (oracle only)
-  reachable_states: ["valid_reachable"]  # truly reachable (oracle only)
 
 # Incumbent attempt-count rule (assumed values pending confirmation against
 # the issued extracts; see docs/dataset_audit.md §6 for the reconstructable
@@ -56,12 +54,11 @@ propensity:
   max_prob: 0.95
 
 report:
-  label: "SIMULATION-ONLY - synthetic data, not real-world performance"
+  label: "RPC evaluation"
   out_dir: "reports"
 
 data:
   events: "data/events.parquet"
   contact_points: "data/contact_points.parquet"
   borrowers: "data/borrowers.parquet"
-  ground_truth: "data/ground_truth.parquet"   # eval-only; models must never read
   policy_log: "data/policy_log.parquet"       # eval-only; models must never read

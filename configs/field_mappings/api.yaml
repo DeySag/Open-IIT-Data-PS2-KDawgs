@@ -1,7 +1,7 @@
 # Field mapping: serving-layer intake (already-canonical InputEvents).
-# SIMULATION-ONLY pipeline glue. The serving layer receives validated
-# InputEvent objects, so this mapping is the identity: contact_point_ref is
-# already a hash (hash_passthrough) and payload arrives as a JSON string.
+# The serving layer receives validated InputEvent objects, so this mapping
+# is the identity: contact_point_ref is already a hash (hash_passthrough)
+# and payload arrives as a JSON string.
 
 source: api
 description: "Identity mapping for validated InputEvents from the serving layer"

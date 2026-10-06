@@ -1,4 +1,4 @@
-"""Feature registry (simulation-only).
+"""Feature registry.
 
 Single source of truth for every feature column emitted by
 :func:`src.rpc.features.features.build_features`. The registry drives:
@@ -346,7 +346,7 @@ def build_registry(
                 "DPD bucket from the borrowers table."),
         Feature("outstanding", "account", "Float64", (), None,
                 "Never null when the borrower row exists.",
-                "Outstanding amount from the borrowers table (simulation-only)."),
+                "Outstanding amount from the borrowers table."),
         Feature("product", "account", "string", (), None,
                 "Never null when the borrower row exists.",
                 "Product segment from the borrowers table."),

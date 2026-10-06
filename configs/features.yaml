@@ -1,4 +1,4 @@
-# Feature pipeline configuration (simulation-only).
+# Feature pipeline configuration.
 # All values are assumptions for CN/SMEs to confirm; see docs/assumptions.md.
 # Feature code must read these via src/rpc/features/spec.py, never hard-code them.
 
@@ -62,7 +62,7 @@ features:
     - "nobody_of_that_name"
     - "met_borrower"
 
-  # Calendar holidays (YYYY-MM-DD, simulation-only illustrative list).
+  # Calendar holidays (YYYY-MM-DD, illustrative list).
   holidays:
     - "2026-08-15"
     - "2026-10-02"

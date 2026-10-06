@@ -92,10 +92,8 @@ linear Python passes are single `Series.map` calls over individual columns and
 one `zip` pass assembling payload JSON for non-passthrough sources; pydantic
 runs only on rejected rows + the 1% sample.
 
-## Performance (superseded — see dataset audit)
+## Performance (see dataset audit)
 
-Earlier simulator-output numbers (414k rows in ~21 s, 1M-row stress in
-~104 s, 5M projection ~4.3 min) are retired with the simulator. Ingest
-throughput is re-measured on the official extracts as part of the mapping
-work (`docs/dataset_audit.md` §13); this section keeps only the mechanism
-notes above, not the numbers.
+Ingest throughput is re-measured on the official extracts as part of the
+mapping work (`docs/dataset_audit.md` §13); this section keeps only the
+mechanism notes above, not the numbers.

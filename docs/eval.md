@@ -1,8 +1,8 @@
-# Evaluation harness (simulation-only)
+# Evaluation harness
 
-All numbers produced here come from synthetic data. Never describe any result
-as real-world performance. Every report table carries the
-`SIMULATION-ONLY - synthetic data, not real-world performance` label.
+Every report table carries the configured `report.label` from
+`configs/eval.yaml`. Never describe any result as real-world performance
+beyond what the evaluated extracts support.
 
 ## Entry point
 
@@ -20,7 +20,7 @@ metric family (baselines vs any registered model), with n and bootstrap CIs.
   optional state posteriors, recycled_risk, confidence]`.
 - `src/rpc/eval/registry.py` — `register_scorer(name, factory)`,
   `get_scorer(name)`, `list_scorers()`. Other agents plug models in by name;
-  `run.py` scores every registered baseline plus `oracle`/`random` diagnostics.
+  `run.py` scores every registered baseline plus `random` diagnostics.
 - Features: `get_feature_builder()` in `_minifeatures.py` returns an adapter
   around the real `src.rpc.features.build_features` (in-memory event source,
   PIT-correct; mini columns backfilled only where the real output lacks them
@@ -33,15 +33,14 @@ metric family (baselines vs any registered model), with n and bootstrap CIs.
 - Rolling-origin splits by `as_of` with embargo gap (`configs/eval.yaml`);
   never random k-fold. `check_splits` enforces embargo + advancing origins.
 - Labels: observed `rpc_next_7d` among DIALLED contact points (`censored`
-  otherwise, always reported dialled-only) vs oracle (true state/reachable,
-  eval-only read of `data/ground_truth.parquet`).
+  otherwise, always reported dialled-only).
 - Metrics (`metrics.py`): AUC, PR-AUC, Brier, log-loss; reliability table + ECE
   overall (segment split helper `ece_by_segment`); recycled precision/recall at
   operating points + cost-weighted loss (cost ratio from guardrails);
   RPC/1,000 dials, wasted attempts on dead lines, detection-within-k,
   coverage/orphaned; avoiding-vs-invalid confusion + AUC on silent lines plus
   cross-line subset; IPW second view via `policy_log.parquet` when present.
-- Only `src/rpc/eval` may read `ground_truth.parquet` / `policy_log.parquet`
+- Only `src/rpc/eval` may read the restricted `policy_log.parquet`
   (leakage test enforces this at file level; baselines are scanned too).
 
 ## Current status (2026-10-05)

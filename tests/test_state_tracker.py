@@ -17,7 +17,7 @@ import pandas as pd
 import pytest
 import yaml
 
-from src.rpc.models.state_tracker import StateTracker, StateTrackerScorer
+from src.rpc.models.state_tracker import StateTracker
 from src.rpc.models.types import STATE_KEYS
 
 BASE = datetime(2025, 1, 1, tzinfo=timezone.utc)
@@ -335,51 +335,3 @@ def test_em_parameter_recovery():
         n += 1
     acc = hits / n
     assert acc > 1 / 7 + 0.25, f"accuracy {acc:.3f} not above chance by margin"
-
-
-# ---------------------------------------------------------------------------
-# Slow eval on issued canonical extracts (read-only; skips when data absent)
-# ---------------------------------------------------------------------------
-
-
-def _find_eval_outputs():
-    cands = []
-    for root in (Path("data/dev"), Path("data"), Path(".")):
-        if not root.exists():
-            continue
-        ev_files = sorted(root.glob("*event*.parquet")) or sorted(root.glob("events.parquet"))
-        gt_files = sorted(root.glob("*ground_truth*.parquet")) or sorted(root.glob("ground_truth.parquet"))
-        if ev_files and gt_files:
-            cands.append((ev_files[0], gt_files[0]))
-    return cands[0] if cands else None
-
-
-@pytest.mark.slow
-def test_eval_on_issued_dev():
-    found = _find_eval_outputs()
-    if found is None:
-        pytest.skip("no issued dev outputs present")
-    ev_path, gt_path = found
-    events = pd.read_parquet(ev_path)
-    n = len(events)
-    sample = events.sort_values("received_at").iloc[: min(n, 200000)]
-    tr = StateTracker(load_cfg())
-    tr.cfg["em"]["n_iter"] = 3
-    tr.fit(sample)
-    asof = pd.to_datetime(sample["received_at"]).max()
-    scored = StateTrackerScorer(tr).score_df(asof)
-    # Ground truth is read ONLY here, inside the eval-marked test.
-    gt = pd.read_parquet(gt_path)
-    merged = scored.merge(gt, on="contact_point_ref", how="inner")
-    if len(merged) == 0:
-        pytest.skip("no overlapping contact points with ground truth")
-    from sklearn.metrics import log_loss, roc_auc_score
-
-    for k in STATE_KEYS:
-        col = f"sp_{k}"
-        if col in merged.columns and k in merged.columns:
-            print(f"logloss[{k}] = {log_loss(merged[k], merged[col], labels=[0, 1]):.4f}")
-    # avoiding-vs-dead AUC among silent lines
-    silent = merged[(merged["sp_valid_reachable"] + merged["sp_avoiding"]) < 0.5] if "sp_valid_reachable" in merged else merged.iloc[0:0]
-    print(f"eval rows={len(merged)} silent={len(silent)} (simulation-only)")
-    assert len(merged) > 0

@@ -1,4 +1,4 @@
-"""Tests for the point-in-time feature layer (simulation-only).
+"""Tests for the point-in-time feature layer.
 
 Covers the 11 required checks: leakage, late arrival, duplicates,
 micro-fixture hand-computed values, never-attempted rows, cross-line

@@ -46,12 +46,11 @@
 
 ---
 
-## Official extracts (replaces the simulator section)
+## Official extracts
 
-The pipeline now reads the official CN extracts (`datasets/`, gitignored;
-see `docs/dataset_audit.md` for the audit). Simulator parameters below are
-retired with the simulator; assumptions awaiting CN confirmation live with
-the dataset audit's ask-CN list:
+The pipeline reads the official CN extracts (`datasets/`, gitignored;
+see `docs/dataset_audit.md` for the audit). Assumptions awaiting CN
+confirmation live with the dataset audit's ask-CN list:
 
 - State transition/emission/disposition shapes (model priors stay qualitative
   and leakage-free per `configs/state_tracker.yaml`)

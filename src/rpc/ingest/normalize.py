@@ -1,4 +1,4 @@
-"""Contact-point normalisation and hashing (SIMULATION-ONLY pipeline code).
+"""Contact-point normalisation and hashing.
 
 Raw phone numbers / addresses are normalised, then sha256-hashed (truncated to
 16 hex chars) to produce the canonical ``contact_point_ref``. Raw values must

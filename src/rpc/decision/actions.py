@@ -319,7 +319,7 @@ def _all_recycled(scores: list[ContactPointScore]) -> bool:
 
 def _ev_wait(ctx: AccountContext, viable: list[ContactPointScore]) -> float:
     """Expected value of waiting one cycle: temp_unreachable mass suggests
-    self-cure without a trace (simulation-only heuristic)."""
+    self-cure without a trace (conservative heuristic)."""
     if not viable:
         return 0.0
     return max(s.state_posterior["temp_unreachable"] for s in viable) * max(0.0, ctx.outstanding) * 0.02

@@ -1,4 +1,4 @@
-# Rule-based text cues for agent remarks and bot transcripts (v0, simulation-only).
+# Rule-based text cues for agent remarks and bot transcripts (v0).
 # All patterns are case-insensitive regex fragments matched against raw
 # remark/transcript text. They use only observable phrasing (Hinglish and
 # common spelling variants) and MUST NEVER contain internal hidden-state

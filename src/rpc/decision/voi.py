@@ -6,7 +6,7 @@ VOI = P(find valid contact | trace)
       - trace_cost - expected_collection_cost - compliance_and_goodwill_cost
 
 All monetary inputs come from ``configs/costs.yaml``; every number there is
-an assumption for CN/SMEs to confirm (simulation-only).
+an assumption for CN/SMEs to confirm.
 
 Key semantics (per System Prompt):
 - Value is incremental (self-cure accounts gain nothing from a trace).

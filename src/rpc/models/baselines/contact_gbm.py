@@ -1,4 +1,4 @@
-"""Baseline (c): per-contact-point GBM without state tracking (simulation-only).
+"""Baseline (c): per-contact-point GBM without state tracking.
 
 Plain LightGBM on PIT per-contact-point features. Strong on recent-answer
 patterns; has no notion of latent states, evidence decay, or borrower-level

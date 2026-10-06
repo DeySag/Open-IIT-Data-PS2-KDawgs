@@ -1,4 +1,4 @@
-"""Event source abstraction for the feature layer (simulation-only).
+"""Event source abstraction for the feature layer.
 
 The feature code only talks to the ``EventSource`` interface. Today it is
 backed by Parquet files read through DuckDB; when the ingestion event store

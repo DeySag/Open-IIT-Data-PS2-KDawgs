@@ -24,8 +24,14 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# Kilo local state and plans (local only)
+.kilo/
+
 # System prompt (local only)
 System Prompt.md
+
+# Uploaded planning workbooks (local only)
+ps2_models_table.xlsx
 
 # Logs
 *.log

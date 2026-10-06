@@ -1,4 +1,4 @@
-"""Report generator: one comparison table per metric family, simulation-only labels."""
+"""Report generator: one comparison table per metric family."""
 
 from __future__ import annotations
 
@@ -9,10 +9,7 @@ from typing import Any
 
 import pandas as pd
 
-SIM_LABEL = "SIMULATION-ONLY - synthetic data, not real-world performance"
-
-
-def _md_table(df: pd.DataFrame, label: str = SIM_LABEL) -> str:
+def _md_table(df: pd.DataFrame, label: str = "Evaluation") -> str:
     lines = [f"> {label}", ""]
     if df.empty:
         return "\n".join(lines + ["_no rows_", ""])
@@ -28,7 +25,7 @@ def _md_table(df: pd.DataFrame, label: str = SIM_LABEL) -> str:
 def generate_report(
     results: dict[str, Any],
     out_dir: str | Path,
-    label: str = SIM_LABEL,
+    label: str = "Evaluation",
     timestamp: str | None = None,
 ) -> tuple[Path, Path]:
     """Write reports/eval_<timestamp>.md and .json. Returns both paths."""
@@ -58,12 +55,12 @@ def generate_report(
     L.append("")
 
     families: list[tuple[str, str]] = [
-        ("discrimination", "## Discrimination (dialled-only; simulation-only)"),
-        ("calibration", "## Calibration (dialled-only; simulation-only)"),
-        ("rare_event", "## Rare-event: recycled (oracle; simulation-only)"),
-        ("decision", "## Decision metrics (simulation-only)"),
-        ("avoiding_vs_invalid", "## Avoiding vs invalid (oracle subset; simulation-only)"),
-        ("propensity", "## Selection-bias second view: IPW (dialled + IPW; simulation-only)"),
+        ("discrimination", "## Discrimination (dialled-only)"),
+        ("calibration", "## Calibration (dialled-only)"),
+        ("rare_event", "## Rare-event: recycled"),
+        ("decision", "## Decision metrics"),
+        ("avoiding_vs_invalid", "## Avoiding vs invalid"),
+        ("propensity", "## Selection-bias second view: IPW (dialled + IPW)"),
     ]
     tables = results.get("tables", {})
     for key, heading in families:
@@ -72,7 +69,7 @@ def generate_report(
         L.append(_md_table(pd.DataFrame(tables.get(key, [])), label))
 
     if "reliability" in tables:
-        L.append("## Reliability detail: predicted vs observed (simulation-only)")
+        L.append("## Reliability detail: predicted vs observed")
         L.append("")
         for model, rows in tables["reliability"].items():
             L.append(f"### {model}")
@@ -80,7 +77,7 @@ def generate_report(
             L.append(_md_table(pd.DataFrame(rows), label))
 
     if "cross_line" in tables:
-        L.append("## Cross-line subset: silent line while borrower reachable elsewhere (simulation-only)")
+        L.append("## Cross-line subset: silent line while borrower reachable elsewhere")
         L.append("")
         L.append(_md_table(pd.DataFrame(tables["cross_line"]), label))
 

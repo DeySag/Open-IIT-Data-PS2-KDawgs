@@ -1,4 +1,4 @@
-"""Point-in-time feature builder (simulation-only).
+"""Point-in-time feature builder.
 
 One row per phone/address contact point known at ``as_of``. Point-in-time
 rules (non-negotiable, enforced by tests):

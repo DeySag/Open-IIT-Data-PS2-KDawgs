@@ -29,7 +29,7 @@ current green).
 | Serving | FastAPI `/v1/*`, compliance fast path, stale fallback, suppression list |
 | Eval | Rolling-origin harness, bootstrap CIs, calibration, leakage tripwires |
 
-**Known gaps (not hidden):** ingest throughput is re-measured on the official extracts as part of the mapping work (earlier simulator projections retired); `make train-baselines` / `make train-models` reference trainer modules that don't exist yet — baselines are trained inside the eval harness instead; `configs/serve.yaml` doesn't exist so serving runs on in-code defaults; root `.gitignore` pattern `models/` also matches `src/rpc/models` (`/eval/` is already scoped; files were force-added; scoping `models/` to `/models/` needs coordinator approval).
+**Known gaps (not hidden):** ingest throughput is re-measured on the official extracts as part of the mapping work; `make train-baselines` / `make train-models` reference trainer modules that don't exist yet — baselines are trained inside the eval harness instead; `configs/serve.yaml` doesn't exist so serving runs on in-code defaults; root `.gitignore` pattern `models/` also matches `src/rpc/models` (`/eval/` is already scoped; files were force-added; scoping `models/` to `/models/` needs coordinator approval).
 
 ## Architecture
 
@@ -150,8 +150,7 @@ idempotently. Phones/addresses are normalised and sha256-hashed (16 hex);
 raw values never reach the store, dead-letter rows, or logs. DuckDB store:
 `events` (dedupe on `event_id`, keep earliest `received_at`), `dead_letter`
 (redacted, `row_hash`-keyed), `dirty_contact_points` (late vs scoring
-watermarks), `watermarks`. Details: `docs/ingest.md` (historical simulator
-throughput notes retired; re-measured on official extracts with the mapping work).
+watermarks), `watermarks`. Details: `docs/ingest.md`.
 
 ### Features — `src/rpc/features/`
 182 (+1 conditional) point-in-time features via `build_features(as_of, source)`
@@ -210,7 +209,7 @@ splits (train 14d, embargo 3d, test 7d — never random k-fold), observed labels
 AUC/PR/calibration-by-segment/ECE, rare-event precision-recall at operating
 points with cost-weighted loss, RPC-per-1000, avoiding-vs-invalid slices,
 propensity-weighted second view, bootstrap CIs. Reports to
-`reports/eval_<timestamp>.md/.json`, stamped SIMULATION-ONLY. Only `eval/` may
+`reports/eval_<timestamp>.md/.json`, stamped with the configured report label. Only `eval/` may
 read ground truth and policy logs (test-enforced tripwire). Details: `docs/eval.md`.
 
 ## Configuration
@@ -245,7 +244,7 @@ idempotent replay and out-of-order events in `test_ingest.py`.
 ## Documentation
 
 - `docs/assumptions.md` — A1–A6 working assumptions plus pointers to the dataset audit for extract-specific confirmations
-- `docs/decision_log.md` — dated decisions with reasons and rejected alternatives, per workstream (historical entries preserved verbatim, including superseded simulator work)
+- `docs/decision_log.md` — dated decisions with reasons and rejected alternatives, per workstream
 - `docs/decision_log.md` — dated decisions with reasons and rejected alternatives, per workstream
 - `docs/api.md` — serving contract: endpoints, envelopes, fast-path rules, stale policy
 - `docs/decision.md` — decision pipeline, reason-code table, worked VOI example

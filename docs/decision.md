@@ -77,7 +77,7 @@ greedy-by-ratio is exact for fractional knapsack but a heuristic for 0/1
 (whole-trace) knapsack; the optimality gap is small at portfolio scale and
 a DP exact solver is a day-3 option.
 
-### Worked example (simulation-only)
+### Worked example (illustrative numbers)
 
 Account: outstanding Rs 100,000, bucket 31-60, unsecured_retail,
 P(dead)=0.8, digital trace.
@@ -89,7 +89,7 @@ VOI/rupee = 15.11. Test `test_hand_computed_voi_example` pins this.
 ## Assumptions / unverified
 
 - All costs, recovery curves, haircut (20%), lag (0.5y), thresholds are
-  assumptions in `configs/costs.yaml` / `guardrails.yaml` (simulation-only).
+  assumptions in `configs/costs.yaml` / `guardrails.yaml`.
 - Borrower avoidance currently = max avoiding mass (proxy until workstream
   B's hierarchical latent lands); deferral EV(wait) is a stub heuristic.
 - `feature_snapshot_id` = `"stub_snapshot"` until the feature store lands.

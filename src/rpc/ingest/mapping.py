@@ -1,6 +1,6 @@
 """Mapping-driven translation of source records into the canonical envelope.
 
-SIMULATION-ONLY pipeline code. All operations are column-vectorised (pandas);
+Mapping-driven translation of source records into the canonical envelope. All operations are column-vectorised (pandas);
 the only linear passes are single ``Series.map`` calls over individual columns
 (nested-path extraction, contact hashing, event-id derivation) -- never a
 per-row loop with branching logic.

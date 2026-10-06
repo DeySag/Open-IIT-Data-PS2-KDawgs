@@ -1,4 +1,4 @@
-"""Point-in-time feature pipeline, text extraction, graph features (simulation-only).
+"""Point-in-time feature pipeline, text extraction, graph features.
 
 NOTE: the label module (src/rpc/features/labels.py) is intentionally NOT
 referenced here. Feature code must never depend on labels (future outcomes);

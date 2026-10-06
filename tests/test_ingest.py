@@ -1,6 +1,6 @@
-"""Tests for the ingestion adapter + event store (SIMULATION-ONLY fixtures).
+"""Tests for the ingestion adapter + event store (adapter conformance fixtures).
 
-All source data below is fictitious and invented for tests; nothing here is
+All source data below are inline test fixtures; nothing here is
 real CN data.
 """
 
@@ -62,7 +62,7 @@ def ndjson_row(i: int = 0, **overrides) -> dict:
         "call": {"start": "05-03-2024 14:20:00"},
         "outcome": {
             "code": "PTP",
-            "remarks": "simulation-only remark",
+            "remarks": "conformance fixture remark",
             "agent": "AG7",
             "channel": "telecaller",
         },

@@ -1,5 +1,5 @@
 # Cost Configuration (INR)
-# EVERY number in this file is an ASSUMPTION for CN/SMEs to confirm (simulation-only).
+# EVERY number in this file is an ASSUMPTION for CN/SMEs to confirm.
 # Do not present derived figures as business impact.
 
 costs:

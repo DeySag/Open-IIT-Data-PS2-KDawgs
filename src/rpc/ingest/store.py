@@ -1,4 +1,4 @@
-"""DuckDB-backed append-only event store (SIMULATION-ONLY pipeline code).
+"""DuckDB-backed append-only event store.
 
 Tables
 ------

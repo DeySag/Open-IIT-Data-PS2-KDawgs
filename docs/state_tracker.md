@@ -1,7 +1,7 @@
 # State tracker: contact-point HMM + borrower avoidance latent
 
-simulation-only: all numbers below and every fitted parameter are derived from
-synthetic data and qualitative judgement until refit on real CN data.
+All numbers below state the model design; every fitted parameter must be
+estimated on issued extracts before use.
 
 ## 1. Problem
 

@@ -1,4 +1,4 @@
-"""Rule-based text cue extraction from remarks and transcripts (simulation-only).
+"""Rule-based text cue extraction from remarks and transcripts.
 
 v0 keyword/regex layer over Hinglish agent remarks and voice-bot transcripts.
 Patterns live in ``configs/text_patterns.yaml``; this module only applies them.

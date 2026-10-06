@@ -1,4 +1,4 @@
-"""Baseline (a): incumbent attempt-count rule (simulation-only).
+"""Baseline (a): incumbent attempt-count rule.
 
 Re-implements the incumbent policy as configured in configs/eval.yaml:
 rank primary first, move on after k consecutive failures, trace after a fixed

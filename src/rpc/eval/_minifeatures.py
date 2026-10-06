@@ -1,4 +1,4 @@
-"""TEMPORARY mini-features for the eval harness (simulation-only).
+"""TEMPORARY mini-features for the eval harness.
 
 If ``src.rpc.features`` has landed, :func:`get_feature_builder` returns an
 adapter around its ``build_features`` (same 5-argument eval signature, PIT

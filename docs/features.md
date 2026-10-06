@@ -1,12 +1,11 @@
-# Feature layer (simulation-only)
+# Feature layer
 
 Point-in-time feature pipeline in `src/rpc/features/`. One row per phone or
 address contact point known at `as_of`, for health-model training and scoring.
-Everything here is simulation-only unless stated otherwise.
 
 ## 1. Input schemas (official extracts)
 
-The pipeline reads the official CN extracts, not simulator output. Schema,
+The pipeline reads the official CN extracts. Schema,
 codebook, null rates, join integrity, and leakage rules for those files:
 `docs/dataset_audit.md` (committed brief) and the deep records in `datasets/`
 (`01_dataset_audit.md` column inventory, `02_labels_and_entities.md`,
@@ -14,8 +13,8 @@ codebook, null rates, join integrity, and leakage rules for those files:
 
 Key consequences for features (all verified in the audit): contact reference
 is the stable CN `phone_id`/`address_id` (numbers arrive masked); only one
-timestamp per event (assume received == occurred; late-event handling stays
-synthetic-test-only); transcript content is absent (`has_transcript` without
+timestamp per event (assume received == occurred; late-event handling is
+covered by unit tests); transcript content is absent (`has_transcript` without
 a table); account snapshot fields are quarantined until their as-of is
 confirmed; `verified_contact_points` is eval-only gold, never input.
 
@@ -231,7 +230,7 @@ The conditional `agent_wrong_number_rate` row is emitted only when an
 | `gps_dwell_mean_seconds` | field | Float64 | field_visit | - | null for phones or when no dwell recorded. | Mean dwell_seconds across visible visits. |
 | `visit_hour_mean` | field | Float64 | field_visit | - | null for phones or when never visited. | Mean visit hour in IST (circular mean is NOT used; plain mean, documented as approximate). |
 | `dpd_bucket` | account | string | tables/calendar | - | Never null when the borrower row exists. | DPD bucket from the borrowers table. |
-| `outstanding` | account | Float64 | tables/calendar | - | Never null when the borrower row exists. | Outstanding amount from the borrowers table (simulation-only). |
+| `outstanding` | account | Float64 | tables/calendar | - | Never null when the borrower row exists. | Outstanding amount from the borrowers table. |
 | `product` | account | string | tables/calendar | - | Never null when the borrower row exists. | Product segment from the borrowers table. |
 | `secured_flag` | account | boolean | tables/calendar | - | Never null when the borrower row exists. | Whether the product is secured (from the borrowers table). |
 | `has_any_attempt` | core | boolean | dial_attempt | - | Never null. | True when any dial attempt is visible for this contact point. Distinguishes 'no evidence' from measured zeros. |

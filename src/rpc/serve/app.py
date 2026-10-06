@@ -180,7 +180,6 @@ class VisitCandidatesResponse(ResponseEnvelope):
 class HealthResponse(BaseModel):
     status: str
     version: str
-    simulation_only: bool = True
     model_version: str
     feature_snapshot_id: str
     generated_at: datetime
@@ -842,7 +841,6 @@ def create_app(
         return HealthResponse(
             status="ok",
             version=cfg.model_version,
-            simulation_only=True,
             model_version=cfg.model_version,
             feature_snapshot_id=cfg.feature_snapshot_id,
             generated_at=now,

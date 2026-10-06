@@ -190,7 +190,6 @@ def test_health(client):
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert body["simulation_only"] is True
     assert "data_freshness" in body
     assert "staleness_state" in body
     assert "suppression_version" in body
@@ -986,14 +985,14 @@ def test_api_key_check():
 # ---------------------------------------------------------------------------
 
 def test_end_to_end_smoke():
-    """Post a small batch of synthetic events, then get a decision,
+    """Post a small batch of test events, then get a decision,
     dial list, trace queue entry and suppression entry. Passes with
     the stubs and later with the real modules without code changes."""
     app = create_app()
     permissive(app)
     c = TestClient(app)
 
-    # 1. Post a small batch of synthetic events
+    # 1. Post a small batch of test events
     events = [
         make_dial_event(ref="cp_e2e_1", account_id="ACC_E2E"),
         make_event(

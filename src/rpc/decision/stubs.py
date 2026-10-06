@@ -2,7 +2,7 @@
 
 Lets the decision layer run end-to-end without the state-tracker / slot /
 recycled models (workstreams B/C). All values are illustrative
-(simulation-only) and carry stub evidence ids.
+and carry stub evidence ids.
 """
 
 from __future__ import annotations
