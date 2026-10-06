@@ -23,9 +23,41 @@ NUM_COLS = [
     "is_primary",
 ]
 
+# Key/metadata columns that are never model inputs (kept here so to_matrix
+# stays dependency-free instead of importing the feature spec).
+_NON_FEATURE_COLUMNS = frozenset([
+    "lender_id",
+    "borrower_id",
+    "account_id",
+    "contact_point_ref",
+    "as_of",
+    "feature_snapshot_id",
+    "event_watermark",
+])
+
 
 def to_matrix(features: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
-    cols = [c for c in NUM_COLS if c in features.columns]
+    """Select model columns: legacy mini columns when present, else every
+    numeric/boolean registry column (keys, metadata and strings excluded).
+
+    The legacy list covers the eval mini-features contract; the generic
+    fallback lets the scorer train on the full PIT registry output.
+    """
+    legacy = [c for c in NUM_COLS if c in features.columns]
+    has_registry_cols = any(
+        c not in _NON_FEATURE_COLUMNS and c not in NUM_COLS for c in features.columns
+    )
+    if legacy and not has_registry_cols:
+        cols = legacy
+    else:
+        cols = [
+            c for c in features.columns
+            if c not in _NON_FEATURE_COLUMNS
+            and (
+                pd.api.types.is_any_real_numeric_dtype(features[c].dtype)
+                or pd.api.types.is_bool_dtype(features[c].dtype)
+            )
+        ]
     X = features[cols].copy()
     for c in X.columns:
         # The real feature layer emits nullable boolean columns (e.g.
