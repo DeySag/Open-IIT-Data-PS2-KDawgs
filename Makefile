@@ -1,7 +1,7 @@
 # Makefile for PS2 RPC
 # Deterministic commands for data, train, eval, test
 
-.PHONY: help install data-check features-dev train-baselines train-models eval smoke serve lint typecheck test clean
+.PHONY: help install data-check features train-baselines train-models eval smoke serve lint typecheck test clean
 
 help:
 	@echo "PS2 RPC - Available commands:"
@@ -25,8 +25,8 @@ data-check:
 	@test -f datasets/accounts.csv || (echo "missing datasets/accounts.csv" && exit 1)
 	@echo "official extracts present (see docs/dataset_audit.md)"
 
-features-dev:
-	python -m src.rpc.features.build --scale dev --out data/features_dev.parquet
+features:
+	python -m src.rpc.features.build --store data/event_store.duckdb --accounts datasets/accounts.csv --as-of-range 2026-05-01 2026-06-29 7 --out data/features_official.parquet
 
 train-baselines:
 	python -m src.rpc.models.train_baselines --data data/dev.parquet --output models/baselines/

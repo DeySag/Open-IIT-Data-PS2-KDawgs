@@ -1,8 +1,22 @@
 # Decision log
 
-All simulation-only unless stated otherwise.
+## 2026-10-06 - features: registry rewritten against official extracts (182 -> 177)
 
-## 2026-10-04 - features: window expansion exceeds the 60-75 target
+**Decision:** cut 20 permanently-dead features (bot group x8: no transcripts;
+immediate_hangup pair x10: never occurs; n_accounts_sharing_cp: identical to
+the borrower variant under borrower=account; secured_flag: underivable, mapping
+unknown), add 15 real ones (callback/switched_off/not_reachable dispositions;
+met_third_party/address_not_found visit counts; 10 account passthroughs
+including bureau_score_band with snapshot quarantine), make the agent feature
+unconditional (agent_id observed), drive RPC recency/labels/confirms off a
+config `rpc_dispositions` family, extend text cues to verified Kannada +
+English variants, rewrite `build.py` for store+accounts inputs.
+**Reason:** audit vs `datasets/` showed dead weight, missing signal (callback
+1,674 events; bureau band +9pp monotone), and literal-"rpc" matching that
+missed the whole rpc family. Verified end-to-end: 88,654 official events
+ingested, 10,038 feature rows x 185 cols in 54 s, registry == output exact.
+**Alternatives:** keep dead columns for forward-compat (rejected: permanent
+zeros mislead models and bloat the store; re-adding later is trivial).
 **Decision:** implement every named feature in the task literally, including
 per-window (1/3/7/14/30d) slot, weekend and ring statistics. Result: 182 base
 features (+1 conditional agent feature) instead of ~60-75.

@@ -87,12 +87,14 @@ def build_registry(
     windows: list[int] = list(fcfg["windows_days"])
     responses: list[str] = list(fcfg["response_values"])
     dispositions: list[str] = list(fcfg["disposition_values"])
-    who_values: list[str] = list(fcfg["bot_who_values"])
     visit_outcomes: list[str] = list(fcfg["visit_outcomes"])
 
     reg: list[Feature] = []
 
     # ---- Telephony, per window -------------------------------------------
+    # NOTE: no immediate_hangup features by design. The mapped extracts never
+    # produce network_response=immediate_hangup, so those columns would be
+    # permanently zero; talk/ring anomalies are covered by ring stats instead.
     for w in windows:
         sfx = window_suffix(w)
         reg += [
@@ -105,12 +107,6 @@ def build_registry(
             Feature(f"answer_rate{sfx}", "telephony", "Float64", ("dial_attempt",), w,
                     "null when no attempts in window (never 0-imputed).",
                     f"n_answered / n_attempts over the last {w}d."),
-            Feature(f"n_immediate_hangup{sfx}", "telephony", "Int64", ("dial_attempt",), w,
-                    "0 when no attempts in window.",
-                    f"Attempts with network_response=immediate_hangup in {w}d."),
-            Feature(f"hangup_rate{sfx}", "telephony", "Float64", ("dial_attempt",), w,
-                    "null when no attempts in window.",
-                    f"n_immediate_hangup / n_attempts over {w}d."),
         ]
         for resp in responses:
             reg.append(Feature(
@@ -209,39 +205,20 @@ def build_registry(
                 "Max months extracted from phrases like 'number band hai 2 mahine se'."),
     ]
 
-    # ---- Voice-bot transcripts ----------------------------------------------
-    reg += [
-        Feature("n_bot_calls", "bot", "Int64", ("bot_transcript",), None,
-                "0 when no visible transcripts.",
-                "Visible voice-bot transcripts (all-time)."),
-    ]
-    for who in who_values:
-        reg.append(Feature(
-            f"n_bot_who_{who}", "bot", "Int64", ("bot_transcript",), None,
-            "0 when no visible transcripts.",
-            f"Transcripts where who_answered={who} (payload key when present, "
-            "else derived: third-party/name cue -> other, else unknown)."))
-    reg += [
-        Feature("n_bot_whoisthis_cue", "bot", "Int64", ("bot_transcript",), None,
-                "0 when no match.", "Transcripts matching 'who is this' phrasing."),
-        Feature("n_bot_name_mismatch", "bot", "Int64", ("bot_transcript",), None,
-                "0 when no match.", "Transcripts matching name-mismatch phrasing."),
-        Feature("n_bot_language_mismatch", "bot", "Int64", ("bot_transcript",), None,
-                "0 when no match.", "Transcripts matching language-barrier phrasing."),
-        Feature("last_who_answered", "bot", "string", ("bot_transcript",), None,
-                "null when no visible transcripts.",
-                "who_answered of the most recent transcript."),
-    ]
+    # NOTE: no voice-bot transcript group by design. The issued extracts carry
+    # no transcript table (has_transcript flag only), so all bot columns would
+    # be permanently null/zero. Re-add with who_answered + cue features if
+    # transcript content ever arrives.
 
     # ---- Shared contacts (lender-local) --------------------------------------
+    # NOTE: only the borrower-grained sharing count is emitted. Under Q1
+    # (borrower grain IS account grain: no borrower_id exists) an account
+    # variant would be perfectly collinear, so it is cut, not duplicated.
     reg += [
         Feature("n_borrowers_sharing_cp", "shared", "Int64",
                 ("contact_point_update",), None,
                 "Always >= 1 for rows in the universe.",
                 "Distinct borrowers sharing this contact_point_ref within the same lender."),
-        Feature("n_accounts_sharing_cp", "shared", "Int64",
-                ("contact_point_update",), None,
-                "Always >= 1.", "Distinct accounts sharing this ref within the lender."),
         Feature("is_shared", "shared", "boolean", ("contact_point_update",), None,
                 "Never null.", "True when >1 borrower shares this ref within the lender."),
         Feature("n_phone_cps_for_borrower", "shared", "Int64",
@@ -340,20 +317,16 @@ def build_registry(
     ]
 
     # ---- Account context ---------------------------------------------------------
-    reg += [
-        Feature("dpd_bucket", "account", "string", (), None,
-                "Never null when the borrower row exists.",
-                "DPD bucket from the borrowers table."),
-        Feature("outstanding", "account", "Float64", (), None,
-                "Never null when the borrower row exists.",
-                "Outstanding amount from the borrowers table."),
-        Feature("product", "account", "string", (), None,
-                "Never null when the borrower row exists.",
-                "Product segment from the borrowers table."),
-        Feature("secured_flag", "account", "boolean", (), None,
-                "Never null when the borrower row exists.",
-                "Whether the product is secured (from the borrowers table)."),
-    ]
+    # Passthroughs from the borrowers table (or the official accounts.csv
+    # fallback columns). No secured_flag: no secured column exists and the
+    # portfolio->secured mapping is unknown — inventing it would fabricate a
+    # model input, so it is cut, not guessed.
+    for spec_entry in fcfg.get("account_passthroughs", []):
+        reg.append(Feature(
+            spec_entry["feature"], "account", spec_entry["dtype"], (), None,
+            "Null when the borrower row is absent or the source column is.",
+            f"Account context passthrough ({spec_entry['feature']})."))
+
 
     # ---- Core presence -------------------------------------------------------------
     reg += [

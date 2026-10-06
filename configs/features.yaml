@@ -39,12 +39,27 @@ features:
     - "busy"
 
   # Disposition values expanded as n_<disposition> count features.
+  # Must match the canonical values the ingest mappings emit; values absent
+  # from mapped data yield permanently-zero columns, so keep this list tight.
   disposition_values:
     - "rpc"
     - "wrong_number"
     - "third_party"
     - "dispute"
     - "promise_to_pay"
+    - "callback"
+    - "switched_off"
+    - "not_reachable"
+
+  # Disposition values that count as borrow-contact (RPC evidence) for
+  # recency/confirmation/label features. rpc_* variants map into these
+  # canonical values at ingest; the list lives here (not hardcoded) so a
+  # sanctioned-set change is config-only.
+  rpc_dispositions:
+    - "RPC"
+    - "promise_to_pay"
+    - "callback"
+    - "dispute"
 
   # A payment confirms a contact point if it occurs within this many days
   # AFTER an answered call or RPC disposition on that contact point.
@@ -57,10 +72,37 @@ features:
     - "unknown"
 
   # Field-visit outcomes expanded as visit count features.
+  # Must match the canonical outcomes the ingest mappings emit.
   visit_outcomes:
     - "locked_premises"
     - "nobody_of_that_name"
     - "met_borrower"
+    - "met_third_party"
+    - "address_not_found"
+
+  # Account-context passthroughs: feature name, candidate source columns
+  # (first present column wins), output dtype. The borrowers table carries
+  # canonical names; the official accounts.csv carries the fallbacks
+  # (borrower grain IS account grain: no borrower_id exists, Q1).
+  # Quarantined (snapshot as-of unconfirmed or behaviour-history with
+  # unknown provenance — excluded, not emitted): salary_credit_day,
+  # ability_to_pay_estimate, prev_ptp_count, prev_ptp_broken.
+  # secured_flag dropped: no secured column exists and the
+  # portfolio->secured mapping is unknown (do not invent it).
+  account_passthroughs:
+    - {feature: dpd_bucket, columns: [dpd_bucket, bucket_start], dtype: string}
+    - {feature: outstanding, columns: [outstanding], dtype: Float64}
+    - {feature: product, columns: [product, portfolio], dtype: string}
+    - {feature: bureau_score_band, columns: [bureau_score_band], dtype: string}
+    - {feature: income_type, columns: [income_type], dtype: string}
+    - {feature: preferred_language, columns: [preferred_language], dtype: string}
+    - {feature: town_id, columns: [town_id], dtype: string}
+    - {feature: dpd_start, columns: [dpd_start], dtype: Int64}
+    - {feature: overdue_start, columns: [overdue_start], dtype: Float64}
+    - {feature: emi_amount, columns: [emi_amount], dtype: Float64}
+    - {feature: other_active_loans, columns: [other_active_loans], dtype: Int64}
+    - {feature: paid_other_lenders_30d, columns: [paid_other_lenders_30d], dtype: boolean}
+    - {feature: last_bounce_reason, columns: [last_bounce_reason], dtype: string}
 
   # Calendar holidays (YYYY-MM-DD, illustrative list).
   holidays:

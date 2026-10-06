@@ -315,13 +315,10 @@ def test_micro_fixture_cross_line_and_confirmations():
     assert b["days_since_last_rpc"] == 1
     assert b["n_attempts_1d"] == 1
     assert b["answer_rate_1d"] == pytest.approx(1.0)
-    assert b["n_bot_calls"] == 2
-    assert b["n_bot_who_borrower"] == 1
-    assert b["n_bot_who_other"] == 1
-    assert b["n_bot_who_unknown"] == 0
-    assert b["n_bot_whoisthis_cue"] == 1
-    assert b["n_bot_name_mismatch"] == 0
-    assert b["last_who_answered"] == "other"
+    # no transcript table exists in issued data: bot columns are absent,
+    # not zero-filled (cut by design, not by accident)
+    for col in ("n_bot_calls", "n_bot_who_borrower", "last_who_answered"):
+        assert col not in out.columns, col
     assert b["remark_avoidance_cue_count"] == 1
     # payment p1 confirms B (within 7d after answered d5 / RPC x4), not A
     assert bool(b["confirmed_by_payment"]) is True
@@ -355,7 +352,6 @@ def test_micro_fixture_address_and_shared():
     sh9 = row_for(out, "LENDER_002", "BORR_0009", "SH")
     assert sh1["is_shared"] == True  # noqa: E712
     assert sh1["n_borrowers_sharing_cp"] == 2
-    assert sh1["n_accounts_sharing_cp"] == 2
     assert sh2["is_shared"] == True  # noqa: E712
     assert sh9["is_shared"] == False  # noqa: E712
     assert sh9["n_borrowers_sharing_cp"] == 1
@@ -382,7 +378,6 @@ def test_never_attempted_row_semantics():
     assert n["n_attempts_30d"] == 0
     assert n["n_answered_30d"] == 0
     assert pd.isna(n["answer_rate_30d"])
-    assert pd.isna(n["hangup_rate_30d"])
     assert pd.isna(n["answer_rate_morning_30d"])
     assert pd.isna(n["weekend_attempt_share_30d"])
     assert pd.isna(n["ring_seconds_mean_30d"])
@@ -408,6 +403,69 @@ def test_cross_line_direction():
     assert b["other_lines_answered_7d"] == 0  # B's others exclude B itself
 
 
+def test_rewritten_registry_new_signals():
+    """Disposition/visit/account additions from the real-data rewrite."""
+    out = build_features(T, make_fixture())
+    b = row_for(out, L1, B1, "CP_B")
+    # callback is a first-class disposition count now (was dropped pre-rewrite)
+    assert b["n_callback"] == 1
+    assert b["n_switched_off"] == 0
+    assert b["n_not_reachable"] == 0
+    # rpc family (not just literal "rpc") drives recency + confirmation
+    assert b["days_since_last_rpc"] == 1
+    # account passthroughs flow through; secured_flag is gone (underivable)
+    assert "secured_flag" not in out.columns
+    assert b["dpd_bucket"] == "31-60"
+    assert b["product"] == "msme"
+    # dead-on-arrival signals are absent, not zero-imputed fictions
+    for col in ("n_immediate_hangup_30d", "hangup_rate_30d",
+                "n_accounts_sharing_cp"):
+        assert col not in out.columns, col
+
+
+def test_rpc_family_recency_and_account_passthroughs():
+    """promise_to_pay counts as RPC contact; account fields pass through."""
+    extra = [
+        _ev("xp", "disposition", L1, B1, "ACC_0001", "CP_A", "2026-08-13T10:00:00+00:00",
+            "2026-08-13T10:05:00+00:00", {"disposition": "promise_to_pay",
+                                          "agent_id": "AG9"}),
+    ]
+    src = make_fixture(extra)
+    # NOTE: pass raw-shaped events (canonical envelope + JSON payload string),
+    # not the already-canonicalized source frame: canonicalizing twice would
+    # duplicate the parsed payload columns.
+    raw_cols = ["event_id", "event_type", "lender_id", "borrower_id",
+                "account_id", "contact_point_ref", "occurred_at",
+                "received_at", "payload"]
+    events = src._events[raw_cols].copy()
+    # borrowers frame with account-context columns
+    cps = pd.DataFrame([{
+        "contact_point_ref": "CP_A", "borrower_id": B1, "lender_id": L1,
+        "type": "phone", "value_hash": "CP_A", "source": "KYC",
+        "is_primary": True, "created_at": "2026-01-01T00:00:00+00:00"}])
+    bor = pd.DataFrame([{
+        "borrower_id": B1, "lender_id": L1,
+        "bureau_score_band": "550-649", "income_type": "salaried",
+        "preferred_language": "hinglish", "town_id": "T1",
+        "dpd_start": 45, "overdue_start": 4100.0, "emi_amount": 4000.0,
+        "other_active_loans": 2, "paid_other_lenders_30d": True,
+        "last_bounce_reason": "insufficient_funds"}])
+    from src.rpc.features.source import DataFrameEventSource
+    src2 = DataFrameEventSource(events, cps, bor)
+    out = build_features(T, src2)
+    a = row_for(out, L1, B1, "CP_A")
+    assert a["n_promise_to_pay"] == 1
+    assert a["days_since_last_rpc"] == 2  # 08-13 -> T=08-15
+    assert a["bureau_score_band"] == "550-649"
+    assert a["income_type"] == "salaried"
+    assert a["dpd_start"] == 45
+    assert a["overdue_start"] == pytest.approx(4100.0)
+    assert bool(a["paid_other_lenders_30d"]) is True
+    # met_third_party / address_not_found visit counts exist now
+    assert "n_visits_met_third_party" in out.columns
+    assert "n_visits_address_not_found" in out.columns
+
+
 # 7. Shared contacts are lender-local -----------------------------------------------
 def test_shared_contacts_lender_local():
     out = build_features(T, make_fixture())
@@ -425,8 +483,8 @@ def test_no_ground_truth_in_output():
     for token in HIDDEN_STATE_TOKENS:
         assert not any(token in c for c in out.columns), token
     # string-valued outputs carry only observable vocab, never hidden states
-    for col in ("last_response_type", "last_disposition", "last_who_answered",
-                "last_visit_outcome", "source"):
+    for col in ("last_response_type", "last_disposition",
+                  "last_visit_outcome", "source"):
         vals = set(out[col].dropna().astype(str).str.lower().tolist())
         for token in ("valid_reachable", "avoiding", "temp_unreachable",
                       "switched_off_long", "recycled", "invalid"):

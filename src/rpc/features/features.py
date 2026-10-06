@@ -38,10 +38,8 @@ from src.rpc.features.spec import (
     window_suffix,
 )
 from src.rpc.features.text import (
-    BOT_GROUPS,
     REMARK_GROUPS,
     count_cues,
-    derive_who_answered,
     extract_switched_off_months,
 )
 
@@ -181,6 +179,10 @@ def build_features(
     ist = ZoneInfo(fcfg["timezone"])
     slot_bounds = {k: tuple(v) for k, v in fcfg["slots"].items()}
     holidays = set(fcfg.get("holidays", []) or [])
+    # Dispositions counting as borrower contact (RPC evidence). The mapped
+    # extracts emit the rpc_* family as promise_to_pay/callback/dispute/RPC;
+    # matching the literal "rpc" alone would miss all of them.
+    rpc_family = {str(v).lower() for v in fcfg.get("rpc_dispositions", ["RPC"])}
 
     events = source.load_visible_events(as_of)
     cps = source.load_contact_points(as_of)
@@ -300,8 +302,6 @@ def build_features(
             out[f"answer_rate{sfx}"] = pd.Series(np.nan, index=uidx, dtype="Float64")
             for resp in fcfg["response_values"]:
                 out[f"n_{resp}{sfx}"] = pd.Series(0, index=uidx, dtype="Int64")
-            out[f"n_immediate_hangup{sfx}"] = pd.Series(0, index=uidx, dtype="Int64")
-            out[f"hangup_rate{sfx}"] = pd.Series(np.nan, index=uidx, dtype="Float64")
             for slot in ("morning", "afternoon", "evening"):
                 out[f"n_attempts_{slot}{sfx}"] = pd.Series(0, index=uidx, dtype="Int64")
                 out[f"answer_rate_{slot}{sfx}"] = pd.Series(np.nan, index=uidx, dtype="Float64")
@@ -317,10 +317,6 @@ def build_features(
         for resp in fcfg["response_values"]:
             out[f"n_{resp}{sfx}"] = _sum_by_cp(
                 (dw["resp"] == resp).astype("int64"), dw).reindex(uidx).fillna(0).astype("Int64")
-        n_hang = _sum_by_cp((dw["resp"] == "immediate_hangup").astype("int64"), dw)
-        n_hang = n_hang.reindex(uidx).fillna(0).astype("Int64")
-        out[f"n_immediate_hangup{sfx}"] = n_hang
-        out[f"hangup_rate{sfx}"] = _safe_div(n_hang, n_att).where(n_att > 0)
         for slot in ("morning", "afternoon", "evening"):
             in_slot = dw["slot"] == slot
             slot_n = dw[in_slot].groupby(CP_KEYS, sort=False).size()
@@ -419,7 +415,7 @@ def build_features(
             out[feat] = _sum_by_cp(hit, disp).reindex(uidx).fillna(0).astype("Int64")
         months = extract_switched_off_months(remarks)
         out["switched_off_months_max"] = _max_by_cp(months, disp).reindex(uidx).astype("Int64")
-        last_rpc = disp[disp["disp_norm"] == "rpc"].groupby(
+        last_rpc = disp[disp["disp_norm"].isin(rpc_family)].groupby(
             CP_KEYS, sort=False)["occurred_at"].last()
         out["days_since_last_rpc"] = _days_since(as_of, last_rpc.reindex(uidx))
     if include_agent:
@@ -428,30 +424,9 @@ def build_features(
         last_agent = disp.drop_duplicates(subset=CP_KEYS, keep="last").set_index(CP_KEYS)["agent_id"]
         out["agent_wrong_number_rate"] = last_agent.reindex(uidx).map(agent_rate).astype("Float64")
 
-    # ---- voice-bot transcripts -------------------------------------------------
-    bot = events[events["event_type"] == "bot_transcript"].copy() if not events.empty \
-        else events.copy()
-    if bot.empty:
-        out["n_bot_calls"] = pd.Series(0, index=uidx, dtype="Int64")
-        for who_v in fcfg["bot_who_values"]:
-            out[f"n_bot_who_{who_v}"] = pd.Series(0, index=uidx, dtype="Int64")
-        for feat in BOT_GROUPS.values():
-            out[feat] = pd.Series(0, index=uidx, dtype="Int64")
-        out["last_who_answered"] = pd.Series(None, index=uidx, dtype="string")
-    else:
-        bot = bot.sort_values([*CP_KEYS, "occurred_at", "received_at"], kind="mergesort")
-        transcripts = bot["transcript"] if "transcript" in bot.columns else pd.Series("", index=bot.index)
-        explicit = bot["who_answered"] if "who_answered" in bot.columns else pd.Series(None, index=bot.index)
-        bot["who"] = derive_who_answered(transcripts.fillna(""), explicit)
-        out["n_bot_calls"] = bot.groupby(CP_KEYS, sort=False).size().reindex(uidx).fillna(0).astype("Int64")
-        for who_v in fcfg["bot_who_values"]:
-            out[f"n_bot_who_{who_v}"] = bot[bot["who"] == who_v].groupby(
-                CP_KEYS, sort=False).size().reindex(uidx).fillna(0).astype("Int64")
-        for group, feat in BOT_GROUPS.items():
-            hit = count_cues(transcripts.fillna(""), group)
-            out[feat] = _sum_by_cp(hit, bot).reindex(uidx).fillna(0).astype("Int64")
-        out["last_who_answered"] = bot.drop_duplicates(
-            subset=CP_KEYS, keep="last").set_index(CP_KEYS)["who"].reindex(uidx).astype("string")
+    # NOTE: no voice-bot transcript block by design. The issued extracts
+    # carry no transcript table, so bot columns would be permanently null.
+    # The remark-cue machinery above covers the observable text instead.
 
     # ---- shared contacts (lender-local) ------------------------------------------
     share = universe.reset_index(drop=True)
@@ -463,11 +438,6 @@ def build_features(
     out["is_shared"] = (out["n_borrowers_sharing_cp"] > 1).astype("boolean")
     # accounts: resolve account ids first (needed below anyway)
     account_ids = _resolve_account_id(events, uidx)
-    share_accounts = pd.Series(account_ids.values,
-                               index=pd.MultiIndex.from_frame(
-                                   share[["lender_id", "contact_point_ref"]])).groupby(level=[0, 1]).nunique()
-    out["n_accounts_sharing_cp"] = pd.Series(
-        key_tuples.map(share_accounts).astype("Int64").tolist(), index=uidx, dtype="Int64")
     phone_mask = (universe["contact_point_type"] == "phone").values
     n_phones = share[phone_mask].groupby("borrower_id", sort=False).size() \
         if phone_mask.any() else pd.Series(dtype="float64")
@@ -526,7 +496,7 @@ def build_features(
         q["cp_tuple"] = list(map(tuple, dial.loc[dial["answered"], CP_KEYS].values.tolist()))
         qual_frames.append(q[["borrower_id", "cp_tuple", "occurred_at"]])
     if not disp.empty:
-        rpc_mask = disp["disp_norm"] == "rpc"
+        rpc_mask = disp["disp_norm"].isin(rpc_family)
         q2 = disp[rpc_mask][["borrower_id", "occurred_at"]].copy()
         q2["cp_tuple"] = list(map(tuple, disp.loc[rpc_mask, CP_KEYS].values.tolist()))
         qual_frames.append(q2[["borrower_id", "cp_tuple", "occurred_at"]])
@@ -675,34 +645,36 @@ def build_features(
             out.loc[phone_rows, col] = np.nan
 
     # ---- account context ----------------------------------------------------------------------
+    # Generic passthroughs from the borrowers table (or the official
+    # accounts.csv fallback columns per configs/features.yaml
+    # account_passthroughs). No secured_flag: no secured column exists and the
+    # portfolio->secured mapping is unknown. Snapshot fields are quarantined
+    # upstream until their as-of is confirmed; the passthroughs below are the
+    # sanctioned set.
+    def _coerce_passthrough(values: pd.Series, dtype: str) -> pd.Series:
+        if dtype == "boolean":
+            lowered = values.astype("string").str.strip().str.lower()
+            mapped = lowered.map({"true": True, "false": False, "1": True, "0": False})
+            if pd.api.types.is_bool_dtype(values.dtype):
+                mapped = mapped.fillna(values.astype("boolean"))
+            return mapped.astype("boolean")
+        if dtype in ("Int64", "Float64"):
+            return pd.to_numeric(values, errors="coerce").astype(dtype)
+        return values.astype("string")
+
     if not borrowers.empty:
         bor = borrowers.drop_duplicates(subset="borrower_id", keep="first").set_index("borrower_id")
         bor_keys = universe["borrower_id"]
-        out["dpd_bucket"] = pd.Series(
-            bor["dpd_bucket"].reindex(bor_keys.values).values
-            if "dpd_bucket" in bor.columns else [None] * len(uidx),
-            index=uidx, dtype="string")
-        out_raw = pd.to_numeric(
-            bor["outstanding"].reindex(bor_keys.values).values
-            if "outstanding" in bor.columns else [np.nan] * len(uidx),
-            errors="coerce")
-        out["outstanding"] = pd.Series(
-            pd.Series(out_raw).astype("Float64").tolist(), index=uidx, dtype="Float64")
-        out["product"] = pd.Series(
-            bor["product"].reindex(bor_keys.values).values
-            if "product" in bor.columns else [None] * len(uidx),
-            index=uidx, dtype="string")
-        sec_raw = bor["secured"].reindex(bor_keys.values).values if "secured" in bor.columns \
-            else [None] * len(uidx)
-        out["secured_flag"] = pd.Series(
-            [None if (v is None or (isinstance(v, float) and np.isnan(v))) else bool(v)
-             for v in sec_raw],
-            index=uidx, dtype="boolean")
+        for spec_entry in fcfg.get("account_passthroughs", []):
+            col = next((c for c in spec_entry["columns"] if c in bor.columns), None)
+            vals = bor[col].reindex(bor_keys.values).values if col is not None \
+                else [None] * len(uidx)
+            out[spec_entry["feature"]] = _coerce_passthrough(
+                pd.Series(vals, index=uidx), str(spec_entry["dtype"]))
     else:
-        out["dpd_bucket"] = pd.Series(None, index=uidx, dtype="string")
-        out["outstanding"] = pd.Series(np.nan, index=uidx, dtype="Float64")
-        out["product"] = pd.Series(None, index=uidx, dtype="string")
-        out["secured_flag"] = pd.Series(None, index=uidx, dtype="boolean")
+        for spec_entry in fcfg.get("account_passthroughs", []):
+            out[spec_entry["feature"]] = _coerce_passthrough(
+                pd.Series([None] * len(uidx), index=uidx), str(spec_entry["dtype"]))
 
     # ---- calendar ----------------------------------------------------------------------------------
     asof_ist = as_of.tz_convert(ist)

@@ -48,6 +48,20 @@ ALLOWED_BORROWER_COLUMNS = [
     "dpd_days",
     "outstanding",
     "secured",
+    # Official accounts.csv fallbacks (see configs account_passthroughs).
+    # Quarantined snapshot/behaviour fields are deliberately absent.
+    "portfolio",
+    "bucket_start",
+    "bureau_score_band",
+    "income_type",
+    "preferred_language",
+    "town_id",
+    "dpd_start",
+    "overdue_start",
+    "emi_amount",
+    "other_active_loans",
+    "paid_other_lenders_30d",
+    "last_bounce_reason",
 ]
 
 # Payload keys the feature layer knows how to use, per event type.

@@ -5,8 +5,10 @@ IMPORTANT: this module is standalone. It is never imported by
 information can leak into features. Labels intentionally use events with
 ``occurred_at`` AFTER ``as_of`` (the outcome window); that is their purpose.
 
-* ``rpc_next_7d``: any disposition with value RPC occurred in
-  (as_of, as_of + rpc_next_days].
+* ``rpc_next_7d``: any disposition with an RPC-family value occurred in
+  (as_of, as_of + rpc_next_days]. The family comes from
+  ``configs/features.yaml`` (``rpc_dispositions``) so a sanctioned-set
+  change is config-only.
 * ``was_dialled_next_7d``: any dial attempt occurred in the same window.
   Only dialled contact points have a meaningful label; keep this censoring
   flag alongside the label.
@@ -34,6 +36,8 @@ def build_labels(
     as_of = as_utc(as_of)
     config = load_feature_config()
     window_days: int = int(config["labels"]["rpc_next_days"])
+    rpc_family = {str(v).lower() for v in
+                  config["features"].get("rpc_dispositions", ["RPC"])}
     end = as_of + pd.Timedelta(days=window_days)
 
     future = source.load_events_window(as_of, end)
@@ -50,7 +54,7 @@ def build_labels(
     else:
         disp_norm = future["disposition"].fillna("").astype(str).str.lower() \
             if "disposition" in future.columns else pd.Series("", index=future.index)
-        is_rpc = (future["event_type"] == "disposition") & (disp_norm == "rpc")
+        is_rpc = (future["event_type"] == "disposition") & disp_norm.isin(rpc_family)
         rpc_keys = set(map(tuple, future.loc[
             is_rpc, ["lender_id", "borrower_id", "contact_point_ref"]].values.tolist()))
         dial_keys = set(map(tuple, future.loc[

@@ -1,17 +1,21 @@
 # Rule-based text cues for agent remarks and bot transcripts (v0).
 # All patterns are case-insensitive regex fragments matched against raw
-# remark/transcript text. They use only observable phrasing (Hinglish and
-# common spelling variants) and MUST NEVER contain internal hidden-state
+# remark/transcript text. They use only observable phrasing (Hindi,
+# Kannada and English variants observed in issued remarks, plus common
+# spelling variants) and MUST NEVER contain internal hidden-state
 # names (valid_reachable, avoiding, temp_unreachable, switched_off_long,
 # recycled, invalid, true_state, ground_truth). tests/test_features.py
 # enforces this with a scan.
 # All values below are assumptions for CN/SMEs to confirm.
 
-# Hindi number words -> months, for switched_off_months_max extraction.
-# Variants tolerate common spelling differences.
+# Hindi + verified Kannada number words -> months, for
+# switched_off_months_max extraction. Variants tolerate common spelling
+# differences. Kannada entries are added ONLY for words observed in issued
+# remarks (eradu in "eradu tingalinda"); unobserved numerals stay out.
 hindi_numbers:
   ek: 1
   do: 2
+  eradu: 2
   teen: 3
   tin: 3
   char: 4
@@ -32,12 +36,14 @@ hindi_numbers:
   gyarah: 11
   barah: 12
 
-# Month-unit words (singular/plural/Hinglish variants).
+# Month-unit words (singular/plural/Hinglish/Kannada variants).
 month_units:
   - "mahine"
   - "mahina"
   - "mahinon"
   - "maheene"
+  - "maihne"
+  - "tingal\\w*"
   - "months?"
   - "mnth"
 
@@ -48,43 +54,74 @@ year_units:
   - "years?"
 
 patterns:
-  # Phone appears switched off, e.g. "number band hai 2 mahine se".
+  # Phone appears switched off. Extended with Kannada (off ide),
+  # observed typos (switch of / siwtch off) and English (phone off).
   switched_off_cue:
     - "n[au]mb[ae]r\\s*b[ae]?ndh?\\s*(hai|he|h)"
     - "phone\\s*b[ae]?ndh?\\s*(hai|he|h)"
     - "mobile\\s*b[ae]?ndh?\\s*(hai|he|h)"
     - "switch\\s*off\\s*(hai|he|h)"
     - "switched\\s*off"
+    - "switch\\s*of\\b"
+    - "siwtch\\s*off"
+    - "off\\s*ide"
+    - "phone\\s*off"
     - "set\\s*off\\s*(hai|he)"
     - "not\\s*reachable\\s*(hai|he|h|aa\\s*raha)"
     - "phone\\s*nahi\\s*lag\\s*raha"
     - "call\\s*nahi\\s*lag\\s*rah[ai]"
 
-  # Caller reached someone who says it is the wrong number.
+  # Caller reached someone who says it is the wrong number. Extended with
+  # Kannada new-number phrasing (hosa), Hindi naya-number, nobody-by-name
+  # variants and customer-doesn't-know phrasing (all observed). Bare
+  # "antharu/helidru" (said) is deliberately NOT a cue: it occurs across
+  # all dispositions and only discriminates paired with number words.
   wrong_number_cue:
     - "wrong\\s*numb[ae]r"
     - "rong\\s*numb[ae]r"
     - "galat\\s*numb[ae]r"
     - "galt\\s*numb[ae]r"
+    - "hosa\\s*numb[ae]r"
+    - "naya\\s*numb[ae]r"
     - "kisi\\s*aur\\s*ka\\s*numb[ae]r"
     - "koi\\s*aur\\s*(hai|bol\\s*raha)"
     - "yeh\\s*numb[ae]r\\s*(mera|hamara)\\s*nahi"
     - "mera\\s*numb[ae]r\\s*nahi"
+    - "nobody\\s*by\\s*that\\s*name"
+    - "is\\s*naam\\s*ka\\s*koi\\s*nahi"
+    - "ee\\s*hesarina\\s*yaaru\\s*illa"
+    - "customer.*(gottilla|ottilla)"
+    - "customer\\s*ko\\s*nahi\\s*jaanta"
+    - "says\\s*new\\s*number"
     - "do\\s*not\\s*call.*wrong"
 
-  # Someone other than the borrower answered, e.g. "phone uthaya bhai ne".
+  # Someone other than the borrower answered. Extended with Kannada
+  # reported-speech kin (avara ...), office-from phrasing, English
+  # kin+answered and leave/out phrasing (all observed).
   third_party_cue:
     - "phone\\s*u[dt]hay[ae]\\s*(bhai|didi|papa|mummy|pati|patni|beta|beti|dost|padosi|rishtedar|boss|bhabhi|uncle|aunty)"
     - "(bhai|didi|papa|mummy|pati|patni|beta|beti|dost|padosi|rishtedar|bhabhi)\\s*ne\\s*(phone\\s*)?u[dt]hay[ae]"
     - "(bhai|didi|papa|mummy|pati|patni)\\s*ne\\s*baat\\s*k[ai]"
+    - "avara\\s*(thamma|hendathi|appa|amma|anna|tangi|ganda|henthi)"
+    - "office\\s*inda"
+    - "(wife|husband|father|mother|brother|sister|son|daughter)\\s*(ne\\s*)?(uthaya|uthaye|answered|picked)"
+    - "spouse\\s*answered"
+    - "colleague\\s*answered"
+    - "leave\\s*pe(\\s*hai)?"
+    - "bahar\\s*gaye(\\s*hain)?"
     - "borrower\\s*ghar\\s*par\\s*nahi"
     - "ghar\\s*wale\\s*ne\\s*(uthaya|uthay|baat)"
     - "family\\s*member.*(answered|picked| baat)"
     - "saheb\\s*nahi\\s*hain.*(beta|bhai|patni)"
 
   # Borrower seems to be dodging the call (observable phrasing only).
+  # Extended with Kannada later-phrasing (matte call) and English
+  # do-not-call (observed). "beda" (don't want) stays out: unverified.
   avoidance_cue:
     - "baad\\s*me\\s*(call|phone|baat)\\s*kar"
+    - "matte\\s*call"
+    - "don'?t\\s*call"
+    - "do\\s*not\\s*call"
     - "call\\s*m[ae]t\\s*kar"
     - "phone\\s*m[ae]t\\s*kar"
     - "dobara\\s*(call|phone)\\s*m[ae]t"

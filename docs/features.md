@@ -59,8 +59,6 @@ The conditional `agent_wrong_number_rate` row is emitted only when an
 | `n_attempts_1d` | telephony | Int64 | dial_attempt | 1d | 0 when no attempts in window. | Dial attempts with occurred_at in the last 1d. |
 | `n_answered_1d` | telephony | Int64 | dial_attempt | 1d | 0 when no attempts in window. | Attempts with network_response=answered in the last 1d. |
 | `answer_rate_1d` | telephony | Float64 | dial_attempt | 1d | null when no attempts in window (never 0-imputed). | n_answered / n_attempts over the last 1d. |
-| `n_immediate_hangup_1d` | telephony | Int64 | dial_attempt | 1d | 0 when no attempts in window. | Attempts with network_response=immediate_hangup in 1d. |
-| `hangup_rate_1d` | telephony | Float64 | dial_attempt | 1d | null when no attempts in window. | n_immediate_hangup / n_attempts over 1d. |
 | `n_switched_off_1d` | telephony | Int64 | dial_attempt | 1d | 0 when no attempts in window. | Attempts with network_response=switched_off in the last 1d. |
 | `n_not_reachable_1d` | telephony | Int64 | dial_attempt | 1d | 0 when no attempts in window. | Attempts with network_response=not_reachable in the last 1d. |
 | `n_does_not_exist_1d` | telephony | Int64 | dial_attempt | 1d | 0 when no attempts in window. | Attempts with network_response=does_not_exist in the last 1d. |
@@ -79,8 +77,6 @@ The conditional `agent_wrong_number_rate` row is emitted only when an
 | `n_attempts_3d` | telephony | Int64 | dial_attempt | 3d | 0 when no attempts in window. | Dial attempts with occurred_at in the last 3d. |
 | `n_answered_3d` | telephony | Int64 | dial_attempt | 3d | 0 when no attempts in window. | Attempts with network_response=answered in the last 3d. |
 | `answer_rate_3d` | telephony | Float64 | dial_attempt | 3d | null when no attempts in window (never 0-imputed). | n_answered / n_attempts over the last 3d. |
-| `n_immediate_hangup_3d` | telephony | Int64 | dial_attempt | 3d | 0 when no attempts in window. | Attempts with network_response=immediate_hangup in 3d. |
-| `hangup_rate_3d` | telephony | Float64 | dial_attempt | 3d | null when no attempts in window. | n_immediate_hangup / n_attempts over 3d. |
 | `n_switched_off_3d` | telephony | Int64 | dial_attempt | 3d | 0 when no attempts in window. | Attempts with network_response=switched_off in the last 3d. |
 | `n_not_reachable_3d` | telephony | Int64 | dial_attempt | 3d | 0 when no attempts in window. | Attempts with network_response=not_reachable in the last 3d. |
 | `n_does_not_exist_3d` | telephony | Int64 | dial_attempt | 3d | 0 when no attempts in window. | Attempts with network_response=does_not_exist in the last 3d. |
@@ -99,8 +95,6 @@ The conditional `agent_wrong_number_rate` row is emitted only when an
 | `n_attempts_7d` | telephony | Int64 | dial_attempt | 7d | 0 when no attempts in window. | Dial attempts with occurred_at in the last 7d. |
 | `n_answered_7d` | telephony | Int64 | dial_attempt | 7d | 0 when no attempts in window. | Attempts with network_response=answered in the last 7d. |
 | `answer_rate_7d` | telephony | Float64 | dial_attempt | 7d | null when no attempts in window (never 0-imputed). | n_answered / n_attempts over the last 7d. |
-| `n_immediate_hangup_7d` | telephony | Int64 | dial_attempt | 7d | 0 when no attempts in window. | Attempts with network_response=immediate_hangup in 7d. |
-| `hangup_rate_7d` | telephony | Float64 | dial_attempt | 7d | null when no attempts in window. | n_immediate_hangup / n_attempts over 7d. |
 | `n_switched_off_7d` | telephony | Int64 | dial_attempt | 7d | 0 when no attempts in window. | Attempts with network_response=switched_off in the last 7d. |
 | `n_not_reachable_7d` | telephony | Int64 | dial_attempt | 7d | 0 when no attempts in window. | Attempts with network_response=not_reachable in the last 7d. |
 | `n_does_not_exist_7d` | telephony | Int64 | dial_attempt | 7d | 0 when no attempts in window. | Attempts with network_response=does_not_exist in the last 7d. |
@@ -119,8 +113,6 @@ The conditional `agent_wrong_number_rate` row is emitted only when an
 | `n_attempts_14d` | telephony | Int64 | dial_attempt | 14d | 0 when no attempts in window. | Dial attempts with occurred_at in the last 14d. |
 | `n_answered_14d` | telephony | Int64 | dial_attempt | 14d | 0 when no attempts in window. | Attempts with network_response=answered in the last 14d. |
 | `answer_rate_14d` | telephony | Float64 | dial_attempt | 14d | null when no attempts in window (never 0-imputed). | n_answered / n_attempts over the last 14d. |
-| `n_immediate_hangup_14d` | telephony | Int64 | dial_attempt | 14d | 0 when no attempts in window. | Attempts with network_response=immediate_hangup in 14d. |
-| `hangup_rate_14d` | telephony | Float64 | dial_attempt | 14d | null when no attempts in window. | n_immediate_hangup / n_attempts over 14d. |
 | `n_switched_off_14d` | telephony | Int64 | dial_attempt | 14d | 0 when no attempts in window. | Attempts with network_response=switched_off in the last 14d. |
 | `n_not_reachable_14d` | telephony | Int64 | dial_attempt | 14d | 0 when no attempts in window. | Attempts with network_response=not_reachable in the last 14d. |
 | `n_does_not_exist_14d` | telephony | Int64 | dial_attempt | 14d | 0 when no attempts in window. | Attempts with network_response=does_not_exist in the last 14d. |
@@ -139,8 +131,6 @@ The conditional `agent_wrong_number_rate` row is emitted only when an
 | `n_attempts_30d` | telephony | Int64 | dial_attempt | 30d | 0 when no attempts in window. | Dial attempts with occurred_at in the last 30d. |
 | `n_answered_30d` | telephony | Int64 | dial_attempt | 30d | 0 when no attempts in window. | Attempts with network_response=answered in the last 30d. |
 | `answer_rate_30d` | telephony | Float64 | dial_attempt | 30d | null when no attempts in window (never 0-imputed). | n_answered / n_attempts over the last 30d. |
-| `n_immediate_hangup_30d` | telephony | Int64 | dial_attempt | 30d | 0 when no attempts in window. | Attempts with network_response=immediate_hangup in 30d. |
-| `hangup_rate_30d` | telephony | Float64 | dial_attempt | 30d | null when no attempts in window. | n_immediate_hangup / n_attempts over 30d. |
 | `n_switched_off_30d` | telephony | Int64 | dial_attempt | 30d | 0 when no attempts in window. | Attempts with network_response=switched_off in the last 30d. |
 | `n_not_reachable_30d` | telephony | Int64 | dial_attempt | 30d | 0 when no attempts in window. | Attempts with network_response=not_reachable in the last 30d. |
 | `n_does_not_exist_30d` | telephony | Int64 | dial_attempt | 30d | 0 when no attempts in window. | Attempts with network_response=does_not_exist in the last 30d. |
@@ -170,6 +160,9 @@ The conditional `agent_wrong_number_rate` row is emitted only when an
 | `n_third_party` | disposition | Int64 | disposition | - | 0 when no visible dispositions. | Visible dispositions with value third_party (all-time). |
 | `n_dispute` | disposition | Int64 | disposition | - | 0 when no visible dispositions. | Visible dispositions with value dispute (all-time). |
 | `n_promise_to_pay` | disposition | Int64 | disposition | - | 0 when no visible dispositions. | Visible dispositions with value promise_to_pay (all-time). |
+| `n_callback` | disposition | Int64 | disposition | - | 0 when no visible dispositions. | Visible dispositions with value callback (all-time). |
+| `n_switched_off` | disposition | Int64 | disposition | - | 0 when no visible dispositions. | Visible dispositions with value switched_off (all-time). |
+| `n_not_reachable` | disposition | Int64 | disposition | - | 0 when no visible dispositions. | Visible dispositions with value not_reachable (all-time). |
 | `wrong_number_rate` | disposition | Float64 | disposition | - | null when no visible dispositions. | n_wrong_number / all visible dispositions. |
 | `last_disposition` | disposition | string | disposition | - | null when no visible dispositions. | Most recent disposition value (by occurred_at). |
 | `days_since_last_disposition` | disposition | Int64 | disposition | - | null when no visible dispositions. | Days from last visible disposition to as_of. |
@@ -178,16 +171,7 @@ The conditional `agent_wrong_number_rate` row is emitted only when an
 | `remark_thirdparty_cue_count` | text | Int64 | disposition | - | 0 when no match. | Remarks matching third-party-answer phrasing. |
 | `remark_avoidance_cue_count` | text | Int64 | disposition | - | 0 when no match. | Remarks matching observable avoidance phrasing. |
 | `switched_off_months_max` | text | Int64 | disposition | - | null when no duration phrase is found. | Max months extracted from phrases like 'number band hai 2 mahine se'. |
-| `n_bot_calls` | bot | Int64 | bot_transcript | - | 0 when no visible transcripts. | Visible voice-bot transcripts (all-time). |
-| `n_bot_who_borrower` | bot | Int64 | bot_transcript | - | 0 when no visible transcripts. | Transcripts where who_answered=borrower (payload key when present, else derived: third-party/name cue -> other, else unknown). |
-| `n_bot_who_other` | bot | Int64 | bot_transcript | - | 0 when no visible transcripts. | Transcripts where who_answered=other (payload key when present, else derived: third-party/name cue -> other, else unknown). |
-| `n_bot_who_unknown` | bot | Int64 | bot_transcript | - | 0 when no visible transcripts. | Transcripts where who_answered=unknown (payload key when present, else derived: third-party/name cue -> other, else unknown). |
-| `n_bot_whoisthis_cue` | bot | Int64 | bot_transcript | - | 0 when no match. | Transcripts matching 'who is this' phrasing. |
-| `n_bot_name_mismatch` | bot | Int64 | bot_transcript | - | 0 when no match. | Transcripts matching name-mismatch phrasing. |
-| `n_bot_language_mismatch` | bot | Int64 | bot_transcript | - | 0 when no match. | Transcripts matching language-barrier phrasing. |
-| `last_who_answered` | bot | string | bot_transcript | - | null when no visible transcripts. | who_answered of the most recent transcript. |
 | `n_borrowers_sharing_cp` | shared | Int64 | contact_point_update | - | Always >= 1 for rows in the universe. | Distinct borrowers sharing this contact_point_ref within the same lender. |
-| `n_accounts_sharing_cp` | shared | Int64 | contact_point_update | - | Always >= 1. | Distinct accounts sharing this ref within the lender. |
 | `is_shared` | shared | boolean | contact_point_update | - | Never null. | True when >1 borrower shares this ref within the lender. |
 | `n_phone_cps_for_borrower` | shared | Int64 | contact_point_update | - | Always >= 1 for phone rows. | Phone contact points of this borrower known at as_of. |
 | `cp_rank_within_borrower` | shared | Int64 | contact_point_update | - | 1-based; never null. | Rank of this contact point within the borrower by earliest-known time (ties broken by ref). |
@@ -224,15 +208,26 @@ The conditional `agent_wrong_number_rate` row is emitted only when an
 | `n_visits_locked_premises` | field | Int64 | field_visit | - | null for phone contact points; 0 for addresses with no such outcome. | Visible field visits with outcome=locked_premises. |
 | `n_visits_nobody_of_that_name` | field | Int64 | field_visit | - | null for phone contact points; 0 for addresses with no such outcome. | Visible field visits with outcome=nobody_of_that_name. |
 | `n_visits_met_borrower` | field | Int64 | field_visit | - | null for phone contact points; 0 for addresses with no such outcome. | Visible field visits with outcome=met_borrower. |
+| `n_visits_met_third_party` | field | Int64 | field_visit | - | null for phone contact points; 0 for addresses with no such outcome. | Visible field visits with outcome=met_third_party. |
+| `n_visits_address_not_found` | field | Int64 | field_visit | - | null for phone contact points; 0 for addresses with no such outcome. | Visible field visits with outcome=address_not_found. |
 | `n_visits` | field | Int64 | field_visit | - | null for phone contact points. | Visible field visits (all-time). |
 | `last_visit_outcome` | field | string | field_visit | - | null for phones or when never visited. | Most recent visit outcome (by occurred_at). |
 | `days_since_last_visit` | field | Int64 | field_visit | - | null for phones or when never visited. | Days from last visible visit to as_of. |
 | `gps_dwell_mean_seconds` | field | Float64 | field_visit | - | null for phones or when no dwell recorded. | Mean dwell_seconds across visible visits. |
 | `visit_hour_mean` | field | Float64 | field_visit | - | null for phones or when never visited. | Mean visit hour in IST (circular mean is NOT used; plain mean, documented as approximate). |
-| `dpd_bucket` | account | string | tables/calendar | - | Never null when the borrower row exists. | DPD bucket from the borrowers table. |
-| `outstanding` | account | Float64 | tables/calendar | - | Never null when the borrower row exists. | Outstanding amount from the borrowers table. |
-| `product` | account | string | tables/calendar | - | Never null when the borrower row exists. | Product segment from the borrowers table. |
-| `secured_flag` | account | boolean | tables/calendar | - | Never null when the borrower row exists. | Whether the product is secured (from the borrowers table). |
+| `dpd_bucket` | account | string | tables/calendar | - | Null when the borrower row is absent or the source column is. | Account context passthrough (dpd_bucket). |
+| `outstanding` | account | Float64 | tables/calendar | - | Null when the borrower row is absent or the source column is. | Account context passthrough (outstanding). |
+| `product` | account | string | tables/calendar | - | Null when the borrower row is absent or the source column is. | Account context passthrough (product). |
+| `bureau_score_band` | account | string | tables/calendar | - | Null when the borrower row is absent or the source column is. | Account context passthrough (bureau_score_band). |
+| `income_type` | account | string | tables/calendar | - | Null when the borrower row is absent or the source column is. | Account context passthrough (income_type). |
+| `preferred_language` | account | string | tables/calendar | - | Null when the borrower row is absent or the source column is. | Account context passthrough (preferred_language). |
+| `town_id` | account | string | tables/calendar | - | Null when the borrower row is absent or the source column is. | Account context passthrough (town_id). |
+| `dpd_start` | account | Int64 | tables/calendar | - | Null when the borrower row is absent or the source column is. | Account context passthrough (dpd_start). |
+| `overdue_start` | account | Float64 | tables/calendar | - | Null when the borrower row is absent or the source column is. | Account context passthrough (overdue_start). |
+| `emi_amount` | account | Float64 | tables/calendar | - | Null when the borrower row is absent or the source column is. | Account context passthrough (emi_amount). |
+| `other_active_loans` | account | Int64 | tables/calendar | - | Null when the borrower row is absent or the source column is. | Account context passthrough (other_active_loans). |
+| `paid_other_lenders_30d` | account | boolean | tables/calendar | - | Null when the borrower row is absent or the source column is. | Account context passthrough (paid_other_lenders_30d). |
+| `last_bounce_reason` | account | string | tables/calendar | - | Null when the borrower row is absent or the source column is. | Account context passthrough (last_bounce_reason). |
 | `has_any_attempt` | core | boolean | dial_attempt | - | Never null. | True when any dial attempt is visible for this contact point. Distinguishes 'no evidence' from measured zeros. |
 | `contact_point_type` | core | string | contact_point_update | - | Never null. | phone or address for this contact point. |
 | `asof_weekday` | calendar | Int64 | tables/calendar | - | Never null. | as_of weekday in IST (Monday=0). |
