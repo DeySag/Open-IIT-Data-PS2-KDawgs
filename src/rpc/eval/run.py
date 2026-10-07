@@ -17,10 +17,16 @@ import yaml
 
 from src.rpc.eval import metrics as M
 from src.rpc.eval._minifeatures import get_feature_builder
-from src.rpc.eval.labels import observed_labels
+from src.rpc.eval.labels import load_verified_keys, observed_labels, train_labels_only
 from src.rpc.eval.registry import get_scorer, list_scorers, register_builtin_baselines
 from src.rpc.eval.report import generate_report
-from src.rpc.eval.splits import check_splits, default_first_asof, make_rolling_splits
+from src.rpc.eval.splits import (
+    check_splits,
+    default_first_asof,
+    load_official_splits,
+    make_rolling_splits,
+    train_accounts_only,
+)
 
 
 def _load(path: str) -> pd.DataFrame | None:
@@ -38,18 +44,38 @@ def _train_frame(
     rpc_responses: list,
     rpc_dispositions: list,
     builder: object,
+    verified_keys: pd.DataFrame | None = None,
+    official_splits: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
-    """Features at train_end + observed labels in the post-train window (dialled only)."""
+    """Features at train_end + observed TRAIN-only labels in the post-train window.
+
+    Grain is (account, phone). Censored (undialled) and verified-holdout rows
+    are dropped via train_labels_only — never treated as negatives. When the
+    official splits.csv is supplied (secondary sanity), labels are further
+    restricted to TRAIN-split accounts.
+    """
     ev = events.copy()
     ev["occurred_at"] = pd.to_datetime(ev["occurred_at"], utc=True)
     cands = ev[
         (ev["occurred_at"] > pd.to_datetime(train_start, utc=True))
         & (ev["occurred_at"] <= pd.to_datetime(train_end, utc=True))
-    ]["contact_point_ref"].unique().tolist()
-    feats = builder(train_end, cands, ev, cps, borrowers)  # type: ignore[operator]
-    lab = observed_labels(ev, train_end, cands, horizon_days, rpc_responses, rpc_dispositions)
+    ][["account_id", "contact_point_ref"]].drop_duplicates() if "account_id" in ev.columns else pd.DataFrame(
+        {"contact_point_ref": ev[
+            (ev["occurred_at"] > pd.to_datetime(train_start, utc=True))
+            & (ev["occurred_at"] <= pd.to_datetime(train_end, utc=True))
+        ]["contact_point_ref"].unique().tolist()}
+    )
+    cand_refs = cands["contact_point_ref"].unique().tolist()
+    feats = builder(train_end, cand_refs, ev, cps, borrowers)  # type: ignore[operator]
+    lab = observed_labels(
+        ev, train_end, keys=cands if "account_id" in cands.columns else cand_refs,
+        horizon_days=horizon_days, rpc_responses=rpc_responses,
+        rpc_dispositions=rpc_dispositions, verified_keys=verified_keys,
+    )
+    if official_splits is not None and "account_id" in lab.columns:
+        lab = train_accounts_only(lab, official_splits)
     fr = feats.merge(lab, on="contact_point_ref", how="left")
-    fr = fr[~fr["censored"]].copy()  # dialled-only training; flagged in report
+    fr = train_labels_only(fr)  # dialled-only training; flagged in report
     y = fr["rpc_next_7d"].astype(float)
     return fr, y, fr["contact_point_ref"]
 
@@ -73,8 +99,27 @@ def main() -> None:
         )
 
     notes = [
-        "Metrics are DIALLED-ONLY unless noted: undialled contact points are censored (no observable outcome).",
+        "Metrics are DIALLED-ONLY unless noted: undialled contact points are censored (no observable outcome, never negative).",
+        "Labels are per-(account,phone) sanctioned RPC (answered AND rpc_*; language_barrier excluded); "
+        "strict sensitivity (minus hung_up/refused) reported alongside the primary.",
+        "Verified rows are holdout gold only — never train label sources (membership itself is leakage).",
     ]
+    verified_keys = None
+    vpath = lb.get("verified_holdout", "")
+    if vpath:
+        try:
+            verified_keys = load_verified_keys(vpath)
+            notes.append(f"Verified holdout excluded from training: {len(verified_keys)} keys from {vpath}.")
+        except Exception as e:
+            notes.append(f"Verified holdout not loaded ({vpath}): {e}.")
+    official_splits = None
+    spath = dc.get("official_splits", "")
+    if spath:
+        try:
+            official_splits = load_official_splits(spath)
+            notes.append("Official splits.csv used as secondary sanity only (primary = purged rolling origins).")
+        except Exception as e:
+            notes.append(f"Official splits not loaded ({spath}): {e}.")
     if policy_log is None:
         notes.append("policy_log.parquet absent: IPW second view skipped.")
 
@@ -97,21 +142,36 @@ def main() -> None:
 
     # Per-split test frames (features at as_of + labels after embargo).
     per_model_rows: dict[str, list[pd.DataFrame]] = {m: [] for m in model_names}
+    strict_col = f"rpc_next_{lb['horizon_days']}d_strict"
+    total_censored = 0
+    total_verified_holdout = 0
     for s in splits:
         ev = events.copy()
         ev["occurred_at"] = pd.to_datetime(ev["occurred_at"], utc=True)
-        test_refs = ev[
+        test_keys = ev[
+            (ev["occurred_at"] > pd.to_datetime(s.test_start, utc=True))
+            & (ev["occurred_at"] <= pd.to_datetime(s.test_end, utc=True))
+        ][["account_id", "contact_point_ref"]].drop_duplicates() if "account_id" in ev.columns else ev[
             (ev["occurred_at"] > pd.to_datetime(s.test_start, utc=True))
             & (ev["occurred_at"] <= pd.to_datetime(s.test_end, utc=True))
         ]["contact_point_ref"].unique().tolist()
+        test_refs = test_keys["contact_point_ref"].unique().tolist() if isinstance(test_keys, pd.DataFrame) else list(test_keys)
         if not test_refs:
             continue
         feats = builder(s.as_of, test_refs, ev, cps, borrowers)  # type: ignore[operator]
-        lab = observed_labels(ev, s.test_start, test_refs, lb["horizon_days"], lb["rpc_network_responses"], lb["rpc_dispositions"])
+        lab = observed_labels(ev, s.test_start, test_refs if not isinstance(test_keys, pd.DataFrame) else test_keys,
+                              lb["horizon_days"], lb["rpc_network_responses"], lb["rpc_dispositions"],
+                              verified_keys=verified_keys)
         base = feats.merge(lab, on="contact_point_ref", how="left")
+        n_cens = int(base["censored"].sum()) if "censored" in base.columns else 0
+        n_ver = int(base["verified_holdout"].sum()) if "verified_holdout" in base.columns else 0
+        total_censored += n_cens
+        total_verified_holdout += n_ver
         base_eval = base[~base["censored"]].copy()
+        if n_ver:
+            base_eval = base_eval[~base_eval["verified_holdout"]].copy()
 
-        tr_feats, tr_y, _ = _train_frame(ev, cps, borrowers, s.train_start, s.train_end, lb["horizon_days"], lb["rpc_network_responses"], lb["rpc_dispositions"], builder)
+        tr_feats, tr_y, _ = _train_frame(ev, cps, borrowers, s.train_start, s.train_end, lb["horizon_days"], lb["rpc_network_responses"], lb["rpc_dispositions"], builder, verified_keys, official_splits)
         acc_map = None
         if cps is not None and "account_id" in cps.columns:
             acc_map = cps[["contact_point_ref", "account_id"]]
@@ -150,7 +210,8 @@ def main() -> None:
 
     # --- Aggregate + metric families ---
     tables: dict[str, object] = {"discrimination": [], "calibration": [], "rare_event": [],
-                                 "decision": [], "avoiding_vs_invalid": [], "propensity": []}
+                                 "decision": [], "avoiding_vs_invalid": [], "propensity": [],
+                                 "sensitivity": []}
     reliability: dict[str, list] = {}
     n_boot, seed, level = mc["n_bootstrap"], mc["seed"], mc["ci_level"]
     for name, frames in per_model_rows.items():
@@ -175,8 +236,26 @@ def main() -> None:
         order = np.argsort(-np.nan_to_num(p))
         tables["decision"].append({"model": name, "n": int((~np.isnan(y)).sum()),
             "rpc_per_1000_dials": round(M.rpc_per_1000(y[order], mc["rpc_top_n"]), 1)})
+        # Sensitivity: strict variant (minus hung_up/refused) with the same scores.
+        if lb.get("run_strict_sensitivity", True) and strict_col in df.columns:
+            ys = df[strict_col].to_numpy(float)
+            mask = ~np.isnan(ys)
+            if mask.sum() > 0 and np.unique(ys[mask]).size >= 2:
+                try:
+                    auc_s, _, _ = M.bootstrap_ci(M.roc_auc, ys, p, n_boot, seed, level)
+                except Exception:
+                    auc_s = float("nan")
+                tables["sensitivity"].append({"model": name, "variant": "strict_minus_hung_up_refused",
+                    "n": int(mask.sum()), "auc": round(float(auc_s), 4) if auc_s == auc_s else None})
+            else:
+                tables["sensitivity"].append({"model": name, "variant": "strict_minus_hung_up_refused",
+                    "n": int(mask.sum()), "auc": None})
 
     tables["reliability"] = reliability
+    notes.append(
+        f"Scored dialled-only: {total_censored} undialled keys censored (excluded, never negative); "
+        f"{total_verified_holdout} verified-holdout keys excluded from scoring."
+    )
     # IPW second view if policy log exists.
     if policy_log is not None and prop_cfg.get("enabled", True) and per_model_rows.get("contact_gbm"):
         try:
