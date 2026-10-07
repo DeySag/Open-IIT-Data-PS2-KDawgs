@@ -107,6 +107,18 @@ costs:
   deferral:
     deferral_days: 7  # ASSUMPTION
 
+  # Per-lender trace economics (P7: TRAIN-observed mean cost_inr per lender;
+  # L05 had only 14 TRAIN traces, so it uses the global fallback. Method
+  # costs stay assumed-global; only the digital expected cost varies.
+  # Lender IDs are extract labels (rename in mapping, not code).
+  per_lender:
+    L01: {skip_trace: {digital: {expected_cost: 103.7, n_traces: 140}}}  # TRAIN-observed
+    L02: {skip_trace: {digital: {expected_cost: 105.1, n_traces: 92}}}  # TRAIN-observed
+    L03: {skip_trace: {digital: {expected_cost: 105.0, n_traces: 135}}}  # TRAIN-observed
+    L04: {skip_trace: {digital: {expected_cost: 92.4, n_traces: 36}}}  # TRAIN-observed
+    L06: {skip_trace: {digital: {expected_cost: 107.5, n_traces: 106}}}  # TRAIN-observed
+    fallback: {skip_trace: {digital: {expected_cost: 104.4, n_traces: 523}}}  # global TRAIN mean
+
   # VOI calculation
   voi:
     # Portfolio trace budget (daily) (ASSUMED)
