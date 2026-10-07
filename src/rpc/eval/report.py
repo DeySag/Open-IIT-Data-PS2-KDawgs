@@ -61,7 +61,6 @@ def generate_report(
         ("decision", "## Decision metrics"),
         ("avoiding_vs_invalid", "## Avoiding vs invalid"),
         ("propensity", "## Selection-bias second view: IPW (dialled + IPW)"),
-        ("sensitivity", "## Sensitivity: strict RPC variant (minus hung_up/refused, dialled-only)"),
     ]
     tables = results.get("tables", {})
     for key, heading in families:
@@ -76,6 +75,26 @@ def generate_report(
             L.append(f"### {model}")
             L.append("")
             L.append(_md_table(pd.DataFrame(rows), label))
+
+    # P5: Per-segment calibration tables
+    if "segment_ece" in tables:
+        L.append("## Calibration: ECE per segment")
+        L.append("")
+        for model, seg_rows in tables["segment_ece"].items():
+            L.append(f"### {model}")
+            L.append("")
+            L.append(_md_table(pd.DataFrame(seg_rows), label))
+
+    if "segment_reliability" in tables:
+        L.append("## Reliability detail per segment: predicted vs observed")
+        L.append("")
+        for model, seg_dict in tables["segment_reliability"].items():
+            L.append(f"### {model}")
+            L.append("")
+            for seg, rows in seg_dict.items():
+                L.append(f"#### Segment: {seg}")
+                L.append("")
+                L.append(_md_table(pd.DataFrame(rows), label))
 
     if "cross_line" in tables:
         L.append("## Cross-line subset: silent line while borrower reachable elsewhere")
