@@ -1,0 +1,339 @@
+answer_given_valid_calm: 0.35
+avoid_entry_multiplier_by_dpd:
+  1-30: 0.8
+  31-60: 1.0
+  61-90: 1.3
+  90+: 1.6
+  X: 0.5
+confidence_tau_days: 30.0
+em:
+  emission_floor: 0.0001
+  fit_seed: 7
+  max_fit_borrowers: 5000
+  n_iter: 12
+  prior_strength_emission: 10.0
+  prior_strength_initial: 5.0
+  prior_strength_transition: 20.0
+  tol: 0.0001
+emission_disposition:
+  invalid:
+    avoiding:
+      callback: 0.28
+      dispute: 0.01
+      not_reachable: 0.15
+      promise_to_pay: 0.005
+      rpc: 0.005
+      switched_off: 0.05
+      third_party: 0.05
+      wrong_number: 0.45
+    calm:
+      callback: 0.28
+      dispute: 0.01
+      not_reachable: 0.15
+      promise_to_pay: 0.005
+      rpc: 0.005
+      switched_off: 0.05
+      third_party: 0.05
+      wrong_number: 0.45
+  recycled:
+    avoiding:
+      callback: 0.15
+      dispute: 0.015
+      not_reachable: 0.1
+      promise_to_pay: 0.005
+      rpc: 0.01
+      switched_off: 0.05
+      third_party: 0.12
+      wrong_number: 0.55
+    calm:
+      callback: 0.15
+      dispute: 0.015
+      not_reachable: 0.1
+      promise_to_pay: 0.005
+      rpc: 0.01
+      switched_off: 0.05
+      third_party: 0.12
+      wrong_number: 0.55
+  switched_off_long:
+    avoiding:
+      callback: 0.15
+      dispute: 0.02
+      not_reachable: 0.28
+      promise_to_pay: 0.02
+      rpc: 0.03
+      switched_off: 0.4
+      third_party: 0.06
+      wrong_number: 0.04
+    calm:
+      callback: 0.15
+      dispute: 0.02
+      not_reachable: 0.28
+      promise_to_pay: 0.02
+      rpc: 0.03
+      switched_off: 0.4
+      third_party: 0.06
+      wrong_number: 0.04
+  temp_unreachable:
+    avoiding:
+      callback: 0.2
+      dispute: 0.06
+      not_reachable: 0.25
+      promise_to_pay: 0.03
+      rpc: 0.06
+      switched_off: 0.25
+      third_party: 0.12
+      wrong_number: 0.03
+    calm:
+      callback: 0.22
+      dispute: 0.03
+      not_reachable: 0.2
+      promise_to_pay: 0.06
+      rpc: 0.2
+      switched_off: 0.2
+      third_party: 0.06
+      wrong_number: 0.03
+  third_party:
+    avoiding:
+      callback: 0.13
+      dispute: 0.03
+      not_reachable: 0.05
+      promise_to_pay: 0.02
+      rpc: 0.08
+      switched_off: 0.04
+      third_party: 0.6
+      wrong_number: 0.05
+    calm:
+      callback: 0.13
+      dispute: 0.03
+      not_reachable: 0.05
+      promise_to_pay: 0.02
+      rpc: 0.08
+      switched_off: 0.04
+      third_party: 0.6
+      wrong_number: 0.05
+  valid:
+    avoiding:
+      callback: 0.2
+      dispute: 0.06
+      not_reachable: 0.25
+      promise_to_pay: 0.03
+      rpc: 0.06
+      switched_off: 0.25
+      third_party: 0.12
+      wrong_number: 0.03
+    calm:
+      callback: 0.13
+      dispute: 0.03
+      not_reachable: 0.05
+      promise_to_pay: 0.12
+      rpc: 0.55
+      switched_off: 0.05
+      third_party: 0.05
+      wrong_number: 0.02
+emission_network:
+  invalid:
+    avoiding:
+      answered: 0.005
+      busy: 0.02
+      does_not_exist: 0.65
+      immediate_hangup: 0.045
+      no_answer: 0.1
+      not_reachable: 0.12
+      switched_off: 0.06
+    calm:
+      answered: 0.005
+      busy: 0.02
+      does_not_exist: 0.65
+      immediate_hangup: 0.045
+      no_answer: 0.1
+      not_reachable: 0.12
+      switched_off: 0.06
+  recycled:
+    avoiding:
+      answered: 0.06
+      busy: 0.05
+      does_not_exist: 0.4
+      immediate_hangup: 0.05
+      no_answer: 0.2
+      not_reachable: 0.14
+      switched_off: 0.1
+    calm:
+      answered: 0.06
+      busy: 0.05
+      does_not_exist: 0.4
+      immediate_hangup: 0.05
+      no_answer: 0.2
+      not_reachable: 0.14
+      switched_off: 0.1
+  switched_off_long:
+    avoiding:
+      answered: 0.01
+      busy: 0.03
+      does_not_exist: 0.05
+      immediate_hangup: 0.05
+      no_answer: 0.1
+      not_reachable: 0.2
+      switched_off: 0.56
+    calm:
+      answered: 0.02
+      busy: 0.03
+      does_not_exist: 0.05
+      immediate_hangup: 0.05
+      no_answer: 0.1
+      not_reachable: 0.2
+      switched_off: 0.55
+  temp_unreachable:
+    avoiding:
+      answered: 0.03
+      busy: 0.07
+      does_not_exist: 0.005
+      immediate_hangup: 0.065
+      no_answer: 0.4
+      not_reachable: 0.18
+      switched_off: 0.25
+    calm:
+      answered: 0.12
+      busy: 0.1
+      does_not_exist: 0.005
+      immediate_hangup: 0.045
+      no_answer: 0.3
+      not_reachable: 0.18
+      switched_off: 0.25
+  third_party:
+    avoiding:
+      answered: 0.3
+      busy: 0.06
+      does_not_exist: 0.005
+      immediate_hangup: 0.085
+      no_answer: 0.35
+      not_reachable: 0.1
+      switched_off: 0.1
+    calm:
+      answered: 0.45
+      busy: 0.06
+      does_not_exist: 0.005
+      immediate_hangup: 0.045
+      no_answer: 0.28
+      not_reachable: 0.08
+      switched_off: 0.08
+  valid:
+    avoiding:
+      answered: 0.03
+      busy: 0.05
+      does_not_exist: 0.005
+      immediate_hangup: 0.115
+      no_answer: 0.55
+      not_reachable: 0.1
+      switched_off: 0.15
+    calm:
+      answered: 0.4
+      busy: 0.06
+      does_not_exist: 0.005
+      immediate_hangup: 0.035
+      no_answer: 0.4
+      not_reachable: 0.05
+      switched_off: 0.05
+initial_avoid_prob: 0.2
+initial_line_dist:
+  invalid: 0.1
+  recycled: 0.05
+  switched_off_long: 0.08
+  temp_unreachable: 0.1
+  third_party: 0.07
+  valid: 0.6
+line_states:
+- valid
+- temp_unreachable
+- switched_off_long
+- recycled
+- third_party
+- invalid
+model_version: state_tracker_v0.1.0
+overrides:
+  does_not_exist:
+    mass_shift: 0.55
+    to_invalid: 0.6
+  payment:
+    avoid_reset: 0.95
+  rpc_answer:
+    avoid_reset: 0.9
+  wrong_number:
+    mass_shift: 0.45
+    to_invalid: 0.45
+payment_emission:
+  a0: 0.03
+  a1: 0.001
+silence_shift_kappa: 1.5
+silence_strong_weight: 1.0
+silence_weak_weight: 0.5
+slot_multiplier_default: 1.0
+source_initial_dead_multiplier:
+  KYC: 1.0
+  borrower_on_call: 0.4
+  bureau: 1.4
+  later_update: 0.9
+  skip_trace: 1.2
+transcript_cues:
+  avoid_odds_ratio: 3.0
+  avoid_phrases:
+  - nahi dena
+  - phone mat karo
+  - call mat karo
+  - avoid
+  - dhamki
+  - complaint karunga
+  wrong_number_dead_shift: 0.3
+  wrong_number_phrases:
+  - wrong number
+  - galat number
+  - yeh number mera
+  - not my number
+transition_avoid:
+- - 0.97
+  - 0.03
+- - 0.05
+  - 0.95
+transition_line:
+  invalid:
+    invalid: 1.0
+    recycled: 0.0
+    switched_off_long: 0.0
+    temp_unreachable: 0.0
+    third_party: 0.0
+    valid: 0.0
+  recycled:
+    invalid: 0.07
+    recycled: 0.93
+    switched_off_long: 0.0
+    temp_unreachable: 0.0
+    third_party: 0.0
+    valid: 0.0
+  switched_off_long:
+    invalid: 0.07
+    recycled: 0.06
+    switched_off_long: 0.65
+    temp_unreachable: 0.1
+    third_party: 0.02
+    valid: 0.1
+  temp_unreachable:
+    invalid: 0.02
+    recycled: 0.01
+    switched_off_long: 0.1
+    temp_unreachable: 0.55
+    third_party: 0.02
+    valid: 0.3
+  third_party:
+    invalid: 0.08
+    recycled: 0.0
+    switched_off_long: 0.02
+    temp_unreachable: 0.05
+    third_party: 0.8
+    valid: 0.05
+  valid:
+    invalid: 0.01
+    recycled: 0.005
+    switched_off_long: 0.02
+    temp_unreachable: 0.04
+    third_party: 0.005
+    valid: 0.92
+use_borrower_latent: true

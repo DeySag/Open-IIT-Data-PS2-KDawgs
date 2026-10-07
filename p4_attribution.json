@@ -1,0 +1,22 @@
+{
+  "full(selected: DPD-base,k1.5,reset0.9)": {
+    "auc": 0.5778,
+    "n": 603
+  },
+  "no-DPD-mults": {
+    "auc": 0.5735,
+    "n": 603
+  },
+  "no-silence-shift(k=1e9)": {
+    "auc": 0.5747,
+    "n": 603
+  },
+  "no-resets": {
+    "auc": 0.5762,
+    "n": 603
+  },
+  "latent-off(ablation: no pooling/silence; own+pay resets)": {
+    "auc": 0.5662,
+    "n": 603
+  }
+}
