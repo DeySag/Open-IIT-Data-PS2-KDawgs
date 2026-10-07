@@ -341,15 +341,23 @@ class IngestAdapter:
         source: str,
         now: datetime,
     ) -> pd.DataFrame:
-        """Build dead-letter rows with PII redacted (vectorised redact fields)."""
-        cp_kind = (mapping or {}).get("contact_point", {}).get("kind")
-        if cp_kind == "hash_passthrough":
-            redact_fields: list[str] = []  # already a hash, safe to keep for debugging
-        elif mapping is not None:
+        """Build dead-letter rows with PII redacted (vectorised redact fields).
+
+        Beyond the mapped contact field, free-text and masked-identifier
+        columns (remarks, masked numbers, raw address text) are redacted too:
+        they can carry names or quasi-identifiers and must never land in the
+        store or logs (audit §11).
+        """
+        if mapping is None:
+            redact_fields: list[str] = []  # unknown source: redact everything below
+        else:
             raw_field = str(mapping.get("contact_point", {}).get("raw_field", ""))
             redact_fields = [raw_field] if raw_field else []
-        else:
-            redact_fields = []  # unknown source: redact everything below
+            redact_fields += [
+                c
+                for c in ("remark", "remarks", "phone_masked", "address_text")
+                if c in raw.columns and c not in redact_fields
+            ]
         records = raw.to_dict(orient="records")
         hashes: list[str] = []
         raws: list[str] = []

@@ -22,6 +22,7 @@ format: csv
 contact_point:
   raw_field: address_id
   kind: id
+  pepper_env: CN_HASH_PEPPER
 
 fields:
   event_id: {field: visit_id, uuid5: true}

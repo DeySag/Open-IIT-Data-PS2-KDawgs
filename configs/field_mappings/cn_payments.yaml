@@ -16,6 +16,7 @@ format: csv
 contact_point:
   raw_field: account_id
   kind: id
+  pepper_env: CN_HASH_PEPPER
 
 fields:
   event_id: {field: payment_id, uuid5: true}

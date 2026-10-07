@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
 import duckdb
 import pandas as pd
+import pytest
 
 from src.rpc.ingest import IngestAdapter, ingest, read_events, replay
 from src.rpc.ingest.normalize import hash_id_series, hash_phone_series
@@ -618,3 +620,183 @@ def test_cn_field_visits_mapping(tmp_path: Path):
     # Grid GPS coords must not land in lat/lon fields.
     assert "gps_lat" not in payload and "gps_lon" not in payload
     assert "2325.8" not in adapter.read_events().to_string()
+
+
+# ---------------------------------------------------------------------------
+# official extracts: peppered hashing, quarantine, enum coverage (P1)
+# ---------------------------------------------------------------------------
+
+OFFICIAL_DATASETS = os.environ.get("OFFICIAL_DATASETS", "")
+needs_official = pytest.mark.skipif(
+    not OFFICIAL_DATASETS, reason="OFFICIAL_DATASETS env var not set"
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_pepper(monkeypatch):
+    """Legacy-hash assertions assume no pepper; an exported CN_HASH_PEPPER
+    would flip every official ref. Tests needing pepper set it themselves."""
+    monkeypatch.delenv("CN_HASH_PEPPER", raising=False)
+
+
+def test_peppered_hash_differs_and_is_deterministic(monkeypatch):
+    from src.rpc.ingest.mapping import apply_mapping, load_mapping
+    from src.rpc.ingest.normalize import (
+        hash_id_series,
+        hash_normalized,
+        resolve_pepper,
+    )
+
+    assert hash_normalized("PH000001", "p") == hash_normalized("PH000001", "p")
+    assert hash_normalized("PH000001", "p") != hash_normalized("PH000001")
+    assert hash_normalized("PH000001", "p1") != hash_normalized("PH000001", "p2")
+
+    monkeypatch.setenv("CN_HASH_PEPPER", "test-pepper-1")
+    assert resolve_pepper() == "test-pepper-1"
+    mapping = load_mapping("cn_phones")
+    assert mapping is not None
+    frame = pd.DataFrame(
+        [
+            {
+                "phone_id": "PH000001",
+                "account_id": "AC000001",
+                "source": "kyc_origination",
+                "added_date": "2026-04-01",
+                "priority_slot": "0",
+                "lender_id": "L01",
+            }
+        ]
+    )
+    first = apply_mapping(frame, mapping, "cn_phones")
+    second = apply_mapping(frame, mapping, "cn_phones")
+    ref = first["contact_point_ref"].iloc[0]
+    assert ref == second["contact_point_ref"].iloc[0]
+    assert len(ref) == 16
+    assert ref != hash_id_series(pd.Series(["PH000001"])).iloc[0]
+
+
+def test_quarantine_rpc_without_answer_splits_only_pattern_breakers():
+    from src.rpc.ingest.__main__ import split_quarantined_rpc_without_answer
+
+    frame = pd.DataFrame(
+        [
+            {"attempt_id": "A1", "network_response": "answered", "disposition": "rpc_ptp"},
+            {"attempt_id": "A2", "network_response": "ring_no_answer", "disposition": "rpc_ptp"},
+            {"attempt_id": "A3", "network_response": "busy_rejected", "disposition": "rpc_ptp"},
+            {"attempt_id": "A4", "network_response": "answered", "disposition": "no_answer"},
+            {"attempt_id": "A5", "network_response": "answered", "disposition": "rpc_call_back"},
+        ]
+    )
+    kept, quarantined = split_quarantined_rpc_without_answer(frame)
+    assert quarantined["attempt_id"].tolist() == ["A2", "A3"]
+    assert kept["attempt_id"].tolist() == ["A1", "A4", "A5"]
+
+
+def test_dead_rows_redact_free_text_columns(tmp_path: Path):
+    from src.rpc.ingest.mapping import load_mapping
+
+    adapter = make_adapter(tmp_path)
+    mapping = load_mapping("cn_phones")
+    assert mapping is not None
+    raw = pd.DataFrame(
+        [
+            {
+                "phone_id": "PH9SECURE",
+                "phone_masked": "XXXXXX9999",
+                "remark": "SECRETXYZ",
+                "account_id": "AC1",
+            }
+        ]
+    )
+    dead = adapter._dead_rows(
+        raw, mapping, ["unknown_enum"], "cn_phones", datetime.now(UTC)
+    )
+    blob = dead["raw_json"].iloc[0]
+    assert dead["reason"].iloc[0] == "unknown_enum"
+    assert "SECRETXYZ" not in blob
+    assert "XXXXXX9999" not in blob
+    assert "PH9SECURE" not in blob
+
+
+@needs_official
+def test_official_enum_coverage():
+    """Every enum value in the issued extracts is mapped or documented.
+
+    Documented unknowns (rejected on the disposition companion only; the dial
+    companion still carries the network evidence): no_answer, call_rejected,
+    language_barrier, invalid_number.
+    """
+    from src.rpc.ingest.mapping import load_mapping
+
+    d = Path(OFFICIAL_DATASETS)
+    ev = pd.read_csv(d / "dial_attempts.csv", dtype="string")
+    dial_map = load_mapping("cn_dial_attempts")
+    assert dial_map is not None
+    assert set(ev["network_response"].dropna().unique()) <= set(
+        dial_map["payload"]["network_response"]["map"]
+    )
+    assert set(ev["channel"].dropna().unique()) <= set(
+        dial_map["payload"]["channel"]["map"]
+    )
+    disp_map = load_mapping("cn_dial_dispositions")
+    assert disp_map is not None
+    observed_disp = set(ev["disposition"].dropna().unique())
+    assert observed_disp - set(disp_map["payload"]["disposition"]["map"]) == {
+        "no_answer",
+        "call_rejected",
+        "language_barrier",
+        "invalid_number",
+    }
+    ph = pd.read_csv(d / "phones.csv", dtype="string")
+    phones_map = load_mapping("cn_phones")
+    assert phones_map is not None
+    assert set(ph["source"].dropna().unique()) <= set(
+        phones_map["payload"]["source"]["map"]
+    )
+    assert set(ph["priority_slot"].dropna().unique()) <= set(
+        phones_map["payload"]["is_primary"]["map"]
+    )
+    fv = pd.read_csv(d / "field_visits.csv", dtype="string")
+    visits_map = load_mapping("cn_field_visits")
+    assert visits_map is not None
+    assert set(fv["outcome"].dropna().unique()) <= set(
+        visits_map["payload"]["outcome"]["map"]
+    )
+    ad = pd.read_csv(d / "addresses.csv", dtype="string")
+    addr_map = load_mapping("cn_addresses")
+    assert addr_map is not None
+    assert set(ad["source"].dropna().unique()) <= set(
+        addr_map["payload"]["source"]["map"]
+    )
+
+
+@needs_official
+def test_official_end_to_end_idempotent(tmp_path: Path, monkeypatch, capsys):
+    """Full official ingest: counts balance, 24 quarantined, rerun duplicates."""
+    import json as _json
+
+    from src.rpc.ingest.__main__ import main as ingest_main
+
+    monkeypatch.setenv("CN_HASH_PEPPER", "test-pepper-e2e")
+    db = str(tmp_path / "official.duckdb")
+    assert ingest_main(["--datasets", OFFICIAL_DATASETS, "--db", db]) == 0
+    first = _json.loads(capsys.readouterr().out)
+    dial = first["sources"]["cn_dial_attempts"]
+    assert dial["accepted"] == 51105, dial  # zero orphans, full enum cover
+    assert dial["rejected"] == 0, dial
+    disp = first["sources"]["cn_dial_dispositions"]
+    assert disp["quarantined"] == 24, disp  # audit §4 pattern-breakers
+    assert (
+        disp["accepted"] + disp["rejected"] + disp["quarantined"] == 51105
+    ), disp
+    assert first["sources"]["traces"]["loaded"] == 766
+    assert first["totals"]["quarantined"] == 24
+
+    assert ingest_main(["--datasets", OFFICIAL_DATASETS, "--db", db]) == 0
+    second = _json.loads(capsys.readouterr().out)
+    for source, res in second["sources"].items():
+        if source == "traces":
+            assert res["loaded"] == 0 and res["duplicate"] == 766, res
+        else:
+            assert res["accepted"] == 0, (source, res)
+    assert second["sources"]["cn_dial_dispositions"]["quarantined"] == 24
