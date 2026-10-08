@@ -61,6 +61,7 @@ def generate_report(
         ("decision", "## Decision metrics"),
         ("avoiding_vs_invalid", "## Avoiding vs invalid"),
         ("propensity", "## Selection-bias second view: IPW (dialled + IPW)"),
+        ("sensitivity", "## Sensitivity: strict RPC variant (minus hung_up/refused, dialled-only)"),
     ]
     tables = results.get("tables", {})
     for key, heading in families:
