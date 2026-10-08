@@ -9,6 +9,7 @@ per-row loop with branching logic.
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -23,9 +24,12 @@ from src.rpc.ingest.normalize import (
     hash_id_series,
     hash_phone_series,
     passthrough_hash_series,
+    resolve_pepper,
 )
 
 MAPPING_DIR = Path("configs/field_mappings")
+
+logger = logging.getLogger(__name__)
 
 REQUIRED_FIELDS = (
     "event_id",
@@ -284,20 +288,36 @@ def _map_one_field(df: pd.DataFrame, spec: dict[str, Any]) -> pd.Series:
 
 
 def _map_contact(df: pd.DataFrame, mapping: dict[str, Any]) -> pd.Series:
-    """Normalise+hash the raw contact field, or pass through an existing hash."""
+    """Normalise+hash the raw contact field, or pass through an existing hash.
+
+    ``contact_point.pepper_env`` names the env var holding the hash pepper
+    (official mappings declare ``CN_HASH_PEPPER``). When declared but unset,
+    hashing falls back to legacy sha256 and logs once -- loud enough to catch
+    in reviews, quiet enough for simulator fixtures that declare no pepper.
+    """
     na = pd.Series(pd.NA, index=df.index, dtype="string")
     cp_spec = mapping.get("contact_point", {})
     raw_field = cp_spec.get("raw_field", "")
     raw_col = extract_column(df, raw_field) if raw_field else _MISSING
     if raw_col is _MISSING:
         return na
+    pepper = None
+    pepper_env = cp_spec.get("pepper_env")
+    if pepper_env:
+        pepper = resolve_pepper(str(pepper_env))
+        if pepper is None:
+            logger.warning(
+                "contact hashing without pepper: %s unset; refs are "
+                "unpeppered sha256 (rotate by re-ingesting with it set)",
+                pepper_env,
+            )
     kind = cp_spec.get("kind", "phone")
     if kind == "phone":
-        ref = hash_phone_series(raw_col).astype("string")
+        ref = hash_phone_series(raw_col, pepper).astype("string")
     elif kind == "address":
-        ref = hash_address_series(raw_col).astype("string")
+        ref = hash_address_series(raw_col, pepper).astype("string")
     elif kind == "id":
-        ref = hash_id_series(raw_col).astype("string")
+        ref = hash_id_series(raw_col, pepper).astype("string")
     elif kind == "hash_passthrough":
         ref = passthrough_hash_series(raw_col).astype("string")
     else:

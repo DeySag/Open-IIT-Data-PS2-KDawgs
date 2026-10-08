@@ -311,6 +311,45 @@ pre-existing on main and belong to their respective workstreams;
 `tests/test_serve.py`, `tests/test_contracts.py` and `make smoke`
 all pass.
 
+## 2026-10-07 - ingest (P1): official extracts mapped, hashed, quarantined
+
+**Decision:** wire the six `cn_official` mappings end-to-end
+(`python -m src.rpc.ingest`, `make data` with `DATASETS`/`DB` overrides):
+lender join from accounts.csv (unmatched accounts stay null and reject as
+`missing_required_field`, never silently dropped); contact ref = peppered
+HMAC-SHA256 (truncated 16 hex) of `phone_id`/`address_id` via new
+`contact_point.pepper_env: CN_HASH_PEPPER` (pepper from env, never committed;
+unset pepper falls back to legacy sha256 with a logged warning; rotation
+means re-ingest); the 24 rpc_ptp-on-non-answered rows quarantined to
+dead-letter as `quarantined_rpc_without_answer` (dial companion still carries
+the network evidence); dead-letter redaction extended to free-text and
+masked-identifier columns (`remark`, `phone_masked`, `address_text`).
+**Reason:** audit §4/§11/§13: 1 account = 1 borrower (no borrower_id exists);
+received == occurred is a flagged assumption (single timestamp per event);
+naive wall-clock localised to Asia/Kolkata pending CN confirmation;
+`call_rejected` stays rejected on the disposition companion only (echo row,
+dial covers it); `immediate_hangup` NOT derived — zero answered +
+customer-hangup + zero-talk rows exist in this data and CN confirmation is
+pending; `cash_collected -> met_borrower` and `neighbour_says_shifted ->
+nobody_of_that_name` stay flagged for CN; split routing survives via
+account_id linkage (zero orphans verified) with splits.csv consumed
+downstream, never as a feature.
+**Alternatives:** unpeppered hashing everywhere (rejected: audit §11 deadline
+is first real eval); deriving immediate_hangup now (rejected: no instances,
+unconfirmed); accepting the 24 rows as promise_to_pay (rejected: contradicts
+telephony evidence).
+**Verified:** `test_ingest.py` 34 passed incl. 5 new (pepper determinism +
+divergence, quarantine split, free-text redaction, enum coverage pinned
+against the real files, end-to-end counts + idempotency with quarantine == 24
+and dial accepted == 51105); `test_ingest_official.py` 7 passed; legacy-hash
+tests hermetic via autouse pepper-clearing fixture. Full suite 162 passed, 2
+skipped without the official-datasets env (gated tests skip); with
+`OFFICIAL_DATASETS` set the gated tests run and pass.
+**Observed, not fixed (outside ingest ownership):**
+`test_features.py::test_rpc_family_recency_and_account_passthroughs` fails on
+the pristine tree too (NaN remark reaches regex in `text.py`); `test_serve.py`
+cannot collect here (`fastapi` not installed in this env).
+
 ## 2026-10-07 - P2 labels: sanctioned RPC targets with censoring (coordinator sign-off Sagnik, all approved)
 **Owner:** labels workstream. **Sign-off:** coordinator Sagnik on each §5 minimum decision (recorded here before build).
 1. **Sanctioned per-attempt RPC set:** `answered AND disposition LIKE 'rpc_*'` over all 7 raw variants (`rpc_ptp, rpc_call_back, rpc_hung_up, rpc_refused, rpc_hardship, rpc_dispute, rpc_claims_paid`; canonical `RPC, promise_to_pay, callback, dispute`). **Reason:** audit §5 strongest proxy; data confirms 37% non-RPC inside raw `answered` (13,303 answered vs 8,376 rpc-on-answered) so `answered` alone is NOT a label. **Alternatives:** answered-only (rejected: over-broad), rpc-disposition-only without answered (rejected: misses the AND; 24 non-answered rpc_ptp rows quarantined as non-RPC).

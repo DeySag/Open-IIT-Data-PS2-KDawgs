@@ -99,6 +99,7 @@ def extract_switched_off_months_text(text: str | None) -> int | None:
     """
     if not text:
         return None
+    text = str(text)
     cfg = load_patterns()
     if not _compiled("switched_off_cue").search(text):
         return None

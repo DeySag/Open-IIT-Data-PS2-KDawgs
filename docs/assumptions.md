@@ -56,3 +56,22 @@ confirmation live with the dataset audit's ask-CN list:
   and leakage-free per `configs/state_tracker.yaml`)
 - Cost parameters, recovery rates, trace success rates (from observed
   `cost_inr` and recovery outcomes, not assumed flat rates)
+
+## Official extracts: mapping assumptions (P1, all flagged pending CN)
+
+- **Timestamps are Asia/Kolkata wall-clock.** Naive stamps localised to
+  Asia/Kolkata then stored UTC. Dial hours fit IST contact-hours, not UTC.
+  A 5:30 shift moves every slot feature: slot-model work must not assume
+  either until CN confirms.
+- **received_at == occurred_at.** One timestamp per event; late/out-of-order
+  and dirty-marking logic cannot be exercised on this data (covered
+  synthetically in unit tests).
+- **1 account = 1 borrower.** No `borrower_id` exists in any file; borrower_id
+  maps from account_id. Borrower-level constructs (reachability latent,
+  cross-line pooling) run at account grain until a borrower map is supplied.
+- **Contact refs are peppered HMAC-SHA256** (truncated 16 hex) of
+  `phone_id`/`address_id`, pepper from `CN_HASH_PEPPER` (never committed).
+  Unset pepper falls back to legacy sha256 with a warning. Rotation = re-ingest.
+- **Split routing survives mapping untouched.** `split` is routing metadata,
+  never a feature; account_id linkage verified orphan-free; splits.csv is
+  consumed downstream (P2).

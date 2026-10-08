@@ -1,13 +1,21 @@
 """Contact-point normalisation and hashing.
 
-Raw phone numbers / addresses are normalised, then sha256-hashed (truncated to
-16 hex chars) to produce the canonical ``contact_point_ref``. Raw values must
-never be stored or logged after hashing -- see :func:`redact_record`.
+Raw phone numbers / addresses are normalised, then hashed to produce the
+canonical ``contact_point_ref``. Raw values must never be stored or logged
+after hashing -- see :func:`redact_record`.
+
+Hashing modes: plain sha256 (legacy default, keeps simulator/dev fixtures
+stable) or peppered HMAC-SHA256 when a pepper is supplied. Official extracts
+must use the peppered mode (pepper from the ``CN_HASH_PEPPER`` env var, never
+committed); rotating the pepper changes every ref, so rotation means
+re-ingest. Truncation to 16 hex chars applies in both modes.
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
+import os
 import re
 from typing import Any
 
@@ -15,6 +23,7 @@ import pandas as pd
 
 HASH_CHARS = 16
 REDACTED = "[redacted-pii]"
+PEPPER_ENV_VAR = "CN_HASH_PEPPER"
 
 _WS_RE = re.compile(r"\s+")
 _SEPARATORS_RE = re.compile(r"[\s\-.()]+")
@@ -39,23 +48,37 @@ def normalize_address(value: str) -> str:
     return _WS_RE.sub(" ", value.strip().lower())
 
 
-def hash_normalized(normalized: str) -> str:
-    """sha256 of the normalised value, truncated to 16 hex chars."""
+def hash_normalized(normalized: str, pepper: str | None = None) -> str:
+    """Digest of the normalised value, truncated to 16 hex chars.
+
+    ``pepper=None`` keeps the legacy plain-sha256 digest (simulator fixtures,
+    existing tests). Any other value selects HMAC-SHA256 keyed by the pepper.
+    """
+    if pepper:
+        return hmac.new(
+            pepper.encode("utf-8"), normalized.encode("utf-8"), hashlib.sha256
+        ).hexdigest()[:HASH_CHARS]
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:HASH_CHARS]
 
 
-def _hash_unique(normalized: pd.Series) -> pd.Series:
+def resolve_pepper(env_var: str = PEPPER_ENV_VAR) -> str | None:
+    """Pepper from the environment; None (legacy mode) when unset or blank."""
+    value = os.environ.get(env_var, "")
+    return value if value.strip() else None
+
+
+def _hash_unique(normalized: pd.Series, pepper: str | None = None) -> pd.Series:
     """Digest each distinct value once, then map back (vectorised lookup).
 
     Contact values repeat heavily across events; hashing uniques keeps output
     identical while cutting digest calls from rows to distinct values.
     """
     uniques = normalized.unique()
-    table = {value: hash_normalized(value) for value in uniques}
+    table = {value: hash_normalized(value, pepper) for value in uniques}
     return normalized.map(table)
 
 
-def hash_phone_series(values: pd.Series) -> pd.Series:
+def hash_phone_series(values: pd.Series, pepper: str | None = None) -> pd.Series:
     """Vectorised phone normalise+hash using pandas string ops (C-level).
 
     Digests run once per distinct normalised value, mapped back vectorised
@@ -65,14 +88,14 @@ def hash_phone_series(values: pd.Series) -> pd.Series:
     d = s.str.replace(_SEPARATORS_RE, "", regex=True)
     d = d.str.replace(r"^\+", "", regex=True)
     d = d.str.replace(_CC_PREFIX_RE, "", regex=True)
-    return _hash_unique(d)
+    return _hash_unique(d, pepper)
 
 
-def hash_address_series(values: pd.Series) -> pd.Series:
+def hash_address_series(values: pd.Series, pepper: str | None = None) -> pd.Series:
     """Vectorised address normalise+hash."""
     d = values.astype("string").fillna("").str.strip().str.lower()
     d = d.str.replace(r"\s+", " ", regex=True)
-    return _hash_unique(d)
+    return _hash_unique(d, pepper)
 
 
 def passthrough_hash_series(values: pd.Series) -> pd.Series:
@@ -80,7 +103,7 @@ def passthrough_hash_series(values: pd.Series) -> pd.Series:
     return values.astype("string").fillna("").astype(str)
 
 
-def hash_id_series(values: pd.Series) -> pd.Series:
+def hash_id_series(values: pd.Series, pepper: str | None = None) -> pd.Series:
     """Hash stable source IDs verbatim (no normalisation).
 
     For CN-provided identifiers (``phone_id``, ``address_id``) whose raw form
@@ -88,7 +111,7 @@ def hash_id_series(values: pd.Series) -> pd.Series:
     reference is stable, opaque, and independent of display formatting.
     """
     s = values.astype("string").fillna("")
-    return _hash_unique(s)
+    return _hash_unique(s, pepper)
 
 
 def redact_record(record: dict[str, Any], raw_fields: list[str]) -> dict[str, Any]:

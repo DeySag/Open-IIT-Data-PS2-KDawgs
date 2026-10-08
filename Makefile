@@ -21,12 +21,16 @@ help:
 install:
 	pip install -e ".[dev]"
 
+DATASETS ?= datasets
+DB ?= data/event_store.duckdb
+
 data:
-	python -m src.rpc.ingest --datasets datasets --db data/event_store.duckdb
+	@test -n "$$CN_HASH_PEPPER" || echo "WARNING: CN_HASH_PEPPER unset - contact refs fall back to unpeppered sha256 (see docs/dataset_audit.md s11)"
+	python -m src.rpc.ingest --datasets $(DATASETS) --db $(DB)
 
 data-check:
-	@test -f datasets/dial_attempts.csv || (echo "missing datasets/dial_attempts.csv (gitignored official extracts)" && exit 1)
-	@test -f datasets/accounts.csv || (echo "missing datasets/accounts.csv" && exit 1)
+	@test -f $(DATASETS)/dial_attempts.csv || (echo "missing datasets/dial_attempts.csv (gitignored official extracts)" && exit 1)
+	@test -f $(DATASETS)/accounts.csv || (echo "missing $(DATASETS)/accounts.csv" && exit 1)
 	@echo "official extracts present (see docs/dataset_audit.md)"
 
 features:
