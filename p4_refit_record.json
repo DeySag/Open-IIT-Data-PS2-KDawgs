@@ -1,0 +1,102 @@
+{
+  "data_window": {
+    "start": "2026-04-01 02:32:07+00:00",
+    "end": "2026-05-25 17:01:06+00:00",
+    "fit_end": "2026-05-26T00:00Z",
+    "n_events": 35695,
+    "n_borrowers_account_grain": 1680,
+    "assumption": "borrower_id=account_id; 1-account-1-borrower flagged fragile (audit S2); no borrower_id exists"
+  },
+  "config_hash": "52ffe911ad31d894",
+  "n_iter": 12,
+  "tol": 0.0001,
+  "timing_s": 101.5,
+  "prior_strengths": {
+    "transition": 20.0,
+    "emission": 10.0,
+    "initial": 5.0
+  },
+  "prior_vs_data": {
+    "T_S_MAE_prior_to_fitted": 0.062058385097428385,
+    "T_A_MAE": 0.39646754799199224,
+    "E_net_MAE": 0.12211758289893633,
+    "E_disp_MAE": 0.10864981885714382,
+    "pi_s_MAE": 0.08999831078182984,
+    "note": "weak Dirichlet (20/10/5): data dominates; EM counts >> pseudo-counts (35k events); transcript cues untouched (placeholders)"
+  },
+  "transcript_cues": "placeholders only; not fit on remarks (no transcript content)",
+  "fitted": {
+    "T_S": [
+      [
+        0.737,
+        0.0764,
+        0.0104,
+        0.0026,
+        0.105,
+        0.0686
+      ],
+      [
+        0.347,
+        0.453,
+        0.0194,
+        0.0066,
+        0.0996,
+        0.0744
+      ],
+      [
+        0.0271,
+        0.0112,
+        0.9262,
+        0.0058,
+        0.0054,
+        0.0243
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.743,
+        0.0,
+        0.257
+      ],
+      [
+        0.317,
+        0.0558,
+        0.0048,
+        0.0052,
+        0.5379,
+        0.0794
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "T_A": [
+      [
+        0.9131,
+        0.0869
+      ],
+      [
+        0.786,
+        0.214
+      ]
+    ],
+    "pi_s": [
+      0.4289,
+      0.2062,
+      0.0778,
+      0.0595,
+      0.2242,
+      0.0034
+    ],
+    "pi_a0": 0.0242
+  },
+  "final_artifact": "p4_tracker_final/ (selected cfg DPD-base/kappa1.5/reset0.9 + TRAIN-fit params)",
+  "sensitivity_constrained_TA_frozen": "validation AUC 0.537 vs shipped 0.578; avoidance preserved structurally but ranking worse; not shipped. Unconstrained T_A collapsed [[0.97,0.03],[0.05,0.95]]->[[0.91,0.09],[0.79,0.21]], pi_a0 0.20->0.024 (weak Dirichlet 20/10/5 let data dominate; A unidentifiable without labels, audit S5)",
+  "data_rule": "EM TRAIN-split only (<=2026-05-26); validation selects scoring configs; transcript cues placeholders; test+verified final-only"
+}

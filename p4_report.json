@@ -1,0 +1,273 @@
+{
+  "primary": "purged validation RPC discrimination (3 origins 06-03/10/17, embargo 3d, horizon 7d, VAL accounts only, dialled-only)",
+  "validation": {
+    "state_tracker": {
+      "n": 603,
+      "auc": 0.5778,
+      "pr_auc": 0.5417,
+      "brier": 0.3919,
+      "ece": 0.3891,
+      "rpc_per_1000": 444.4,
+      "rpc_per_100": 610.0
+    },
+    "incumbent": {
+      "n": 603,
+      "auc": 0.5936,
+      "pr_auc": 0.4952,
+      "brier": 0.2777,
+      "ece": 0.1828,
+      "rpc_per_1000": 444.4,
+      "rpc_per_100": 440.0
+    },
+    "account_gbm": {
+      "n": 603,
+      "auc": 0.5619,
+      "pr_auc": 0.5037,
+      "brier": 0.2469,
+      "ece": 0.0892,
+      "rpc_per_1000": 444.4,
+      "rpc_per_100": 550.0
+    },
+    "contact_gbm": {
+      "n": 603,
+      "auc": 0.6507,
+      "pr_auc": 0.5873,
+      "brier": 0.2355,
+      "ece": 0.0672,
+      "rpc_per_1000": 444.4,
+      "rpc_per_100": 620.0
+    }
+  },
+  "test_single_origin_06_17": {
+    "incumbent": {
+      "n": 170,
+      "auc": 0.6074,
+      "pr_auc": 0.624,
+      "brier": 0.3267,
+      "ece": 0.2772,
+      "rpc_per_1000": 558.8,
+      "rpc_per_100": 630.0
+    },
+    "contact_gbm": {
+      "n": 170,
+      "auc": 0.6208,
+      "pr_auc": 0.6405,
+      "brier": 0.2543,
+      "ece": 0.1349,
+      "rpc_per_1000": 558.8,
+      "rpc_per_100": 660.0
+    },
+    "account_gbm": {
+      "n": 170,
+      "auc": 0.5251,
+      "pr_auc": 0.5834,
+      "brier": 0.2441,
+      "ece": 0.0429,
+      "rpc_per_1000": 558.8,
+      "rpc_per_100": 510.0
+    },
+    "state_tracker": {
+      "n": 170,
+      "auc": 0.59,
+      "pr_auc": 0.627,
+      "brier": 0.4824,
+      "ece": 0.49,
+      "rpc_per_1000": 558.8,
+      "rpc_per_100": 620.0
+    }
+  },
+  "verified_gold_dead_PIT_06_29": {
+    "tracker_dead": 0.5853,
+    "tracker_recycled": 0.4491,
+    "contact_gbm": 0.4812,
+    "account_gbm": 0.5466,
+    "incumbent": 0.3904,
+    "n": 157,
+    "positives": "not_borrower_number(27)+invalid_number(3) vs borrower_number(127); third_party/switched_off excluded"
+  },
+  "config_selection": {
+    "grid": [
+      {
+        "cfg": [
+          "base",
+          1.5,
+          0.9
+        ],
+        "auc": 0.5828747018895616
+      },
+      {
+        "cfg": [
+          "base",
+          3.0,
+          0.9
+        ],
+        "auc": 0.5804898183819482
+      },
+      {
+        "cfg": [
+          "off",
+          1.5,
+          0.9
+        ],
+        "auc": 0.5798133370023849
+      },
+      {
+        "cfg": [
+          "base",
+          6.0,
+          0.9
+        ],
+        "auc": 0.5791827187671986
+      },
+      {
+        "cfg": [
+          "off",
+          3.0,
+          0.9
+        ],
+        "auc": 0.5764194643184737
+      },
+      {
+        "cfg": [
+          "off",
+          6.0,
+          0.9
+        ],
+        "auc": 0.5759608328747019
+      }
+    ],
+    "best": [
+      "base",
+      1.5,
+      0.9
+    ]
+  },
+  "attribution_dAUC_vs_full": {
+    "full(selected: DPD-base,k1.5,reset0.9)": {
+      "auc": 0.5778,
+      "n": 603
+    },
+    "no-DPD-mults": {
+      "auc": 0.5735,
+      "n": 603
+    },
+    "no-silence-shift(k=1e9)": {
+      "auc": 0.5747,
+      "n": 603
+    },
+    "no-resets": {
+      "auc": 0.5762,
+      "n": 603
+    },
+    "latent-off(ablation: no pooling/silence; own+pay resets)": {
+      "auc": 0.5662,
+      "n": 603
+    }
+  },
+  "refit": {
+    "data_window": {
+      "start": "2026-04-01 02:32:07+00:00",
+      "end": "2026-05-25 17:01:06+00:00",
+      "fit_end": "2026-05-26T00:00Z",
+      "n_events": 35695,
+      "n_borrowers_account_grain": 1680,
+      "assumption": "borrower_id=account_id; 1-account-1-borrower flagged fragile (audit S2); no borrower_id exists"
+    },
+    "config_hash": "52ffe911ad31d894",
+    "n_iter": 12,
+    "tol": 0.0001,
+    "timing_s": 101.5,
+    "prior_strengths": {
+      "transition": 20.0,
+      "emission": 10.0,
+      "initial": 5.0
+    },
+    "prior_vs_data": {
+      "T_S_MAE_prior_to_fitted": 0.062058385097428385,
+      "T_A_MAE": 0.39646754799199224,
+      "E_net_MAE": 0.12211758289893633,
+      "E_disp_MAE": 0.10864981885714382,
+      "pi_s_MAE": 0.08999831078182984,
+      "note": "weak Dirichlet (20/10/5): data dominates; EM counts >> pseudo-counts (35k events); transcript cues untouched (placeholders)"
+    },
+    "transcript_cues": "placeholders only; not fit on remarks (no transcript content)",
+    "fitted": {
+      "T_S": [
+        [
+          0.737,
+          0.0764,
+          0.0104,
+          0.0026,
+          0.105,
+          0.0686
+        ],
+        [
+          0.347,
+          0.453,
+          0.0194,
+          0.0066,
+          0.0996,
+          0.0744
+        ],
+        [
+          0.0271,
+          0.0112,
+          0.9262,
+          0.0058,
+          0.0054,
+          0.0243
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.743,
+          0.0,
+          0.257
+        ],
+        [
+          0.317,
+          0.0558,
+          0.0048,
+          0.0052,
+          0.5379,
+          0.0794
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "T_A": [
+        [
+          0.9131,
+          0.0869
+        ],
+        [
+          0.786,
+          0.214
+        ]
+      ],
+      "pi_s": [
+        0.4289,
+        0.2062,
+        0.0778,
+        0.0595,
+        0.2242,
+        0.0034
+      ],
+      "pi_a0": 0.0242
+    }
+  },
+  "data_rule_compliance": [
+    "EM TRAIN-split only, occurred<=2026-05-26 (fit window), 1680 TRAIN accounts, borrower=account (fragile flag)",
+    "validation selects scoring configs only (DPD/kappa/reset); transcript cues placeholders, never fit on remarks",
+    "test split touched once for final reporting (single origin); verified gold PIT at 06-29 pre-verification, final only",
+    "priors qualitative, Dirichlet 20/10/5; unconstrained fit documented incl. T_A collapse sensitivity (constrained run AUC 0.537 vs 0.578)"
+  ],
+  "decision_note": "rpc_per_1000 degenerate at n=603<1000 (all equal base rate); reported rpc_per_100 (top-100) instead: val contact 620 > tracker 610 > account 550 > incumbent 440"
+}
