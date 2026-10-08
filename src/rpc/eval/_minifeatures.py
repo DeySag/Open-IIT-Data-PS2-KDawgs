@@ -237,7 +237,10 @@ def build_minifeatures(
         (as_of_ts - pd.to_datetime(out["last_answer"], utc=True)).dt.total_seconds() / 86400.0
     )
     if contact_points is not None and "is_primary" in contact_points.columns:
-        prim = contact_points.set_index("contact_point_ref")["is_primary"]
+        # Linkage-grain tables may repeat a ref across accounts (shared
+        # phones): collapse deterministically (primary wins) so the map
+        # index is unique. Unique inputs are unaffected.
+        prim = contact_points.groupby("contact_point_ref")["is_primary"].max()
         out["is_primary"] = out["contact_point_ref"].map(prim).fillna(False).astype(float)
     else:
         out["is_primary"] = 0.0

@@ -1,5 +1,45 @@
 # Decision log
 
+## 2026-10-07 - P3: baselines retrained on issued extracts (bar set, quarantine both ways)
+
+**Result:** incumbent / account GBM / contact GBM train and score end-to-end
+via `run.py`'s rolling-origin loop (9 origins, 2026-04-14→06-09) on the real
+extracts; two reports in `reports/` (quarantine ON/OFF). Test n=2,035 dialled
+refs, 8,614 train fit rows. Bar (quarantine ON, AUC [95% CI]): contact_gbm
+0.641 [0.618,0.661] > account_gbm 0.619 [0.594,0.642] > incumbent 0.611
+[0.589,0.632]; RPC/1000: 587 / 572 / 579; verified-250 dialled slice (n=158):
+0.634 / 0.591 / 0.587. Snapshot numerics add no lift (contact_gbm 0.641→0.637
+with them; CIs overlap everywhere) — quarantine stays until CN confirms
+as-of. IPW second view populated (brier_ipw ≈ brier_dialled + 0.01);
+1/k validates on the random arm (exact 1.000, k==linkage-time-phones 0.879).
+Rare-event and avoiding-vs-invalid stay empty by design (no recycled_risk /
+state posteriors from baselines; no true_state annotations).
+**Decisions:** (1) fit=TRAIN-split frames only, validation rows (same window,
+disjoint accounts) pick GBM params from a 2×2 grid by validation logloss,
+test + verified-250 scoring-only; shared phones routed by modal account (12
+dialled refs span splits — noted, not re-split). (2) Quarantine enforced in
+run.py (drop pre-fit AND pre-score), not in the feature layer: dpd_bucket,
+dpd_start, outstanding, overdue_start, emi_amount, other_active_loans,
+paid_other_lenders_30d, last_bounce_reason; descriptors kept. (3) Label set
+unchanged (eval.yaml RPC/promise_to_pay/callback; 139 rpc_dispute rows differ
+from the features.yaml family — pending sign-off, not changed here).
+**Code fixes (no test changes; tripwire strict):** label columns
+(rpc_next_7d/censored/n_dials_window) excluded from the GBM matrix
+(`_gbm_common`) and the account aggregation (`account_gbm.fit`) — the real
+layer's generic fallback would otherwise train on the target; account_gbm
+now applies its fitted LightGBM to unseen accounts' aggregated features
+(replay-only degenerated to constant 0.5 under account-disjoint splits;
+seen accounts still replay); mini backfill dedupes linkage-grain refs;
+`extract_switched_off_months_text` guards NaN remarks (this also fixed the
+one failing suite test); IPW population is all known refs per origin.
+**Reason:** only what the real feature dtypes / split structure demand;
+baseline identities unchanged (rule stays a rule, GBMs gain no state).
+**Assumptions:** payment pseudo-refs (hash of account_id) excluded from the
+contact universe; cross-line AUC uncomputable (silent-side observed labels
+structurally zero — reported as obs_rate + mean score instead).
+**Verified:** full suite 188 passed; `reports/eval_20261007T194053Z.*`
+(quarantine ON) + `eval_20261007T201634Z.*` (snapshot included).
+
 ## 2026-10-06 - features: registry rewritten against official extracts (182 -> 177)
 
 **Decision:** cut 20 permanently-dead features (bot group x8: no transcripts;
