@@ -61,6 +61,8 @@ def generate_report(
         ("decision", "## Decision metrics"),
         ("avoiding_vs_invalid", "## Avoiding vs invalid"),
         ("propensity", "## Selection-bias second view: IPW (dialled + IPW)"),
+        ("fit_check", "## Train vs validation vs test (pooled, dialled-only)"),
+        ("verified_gold", "## Verified-gold slice (scoring-only, dialled-only)"),
     ]
     tables = results.get("tables", {})
     for key, heading in families:

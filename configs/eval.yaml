@@ -4,7 +4,7 @@
 
 splits:
   step_days: 7          # spacing between successive as_of origins
-  n_splits: 3           # number of rolling origins
+  n_splits: 9           # number of rolling origins (covers 2026-04-15 -> 06-10 on issued extracts)
   train_days: 14        # lookback window ending at as_of used for training
   embargo_days: 3       # gap between train max and test start (no scoring inside gap)
   test_days: 7          # scoring window after embargo
@@ -43,6 +43,20 @@ baselines:
     num_leaves: 31
     min_child_samples: 20
     seed: 42
+  # Validation-split rows (same train window, disjoint accounts) may select
+  # GBM hyperparameters by validation logloss. Test + verified-250 stay
+  # scoring-only. Small deterministic grid; ties break to the first point.
+  tune_on_validation: true
+  grid:
+    n_estimators: [100, 200]
+    min_child_samples: [20, 50]
+
+# Account snapshot numerics (dpd/bucket/emi/overdue/outstanding/paid_other/
+# bounce/last_bounce_reason/other_active_loans) stay QUARANTINED until their
+# as-of is confirmed: dropped from fit AND score frames when true. Run with
+# AND without (CLI --quarantine-snapshot on|off overrides) and report both.
+features:
+  quarantine_snapshot: true
 
 metrics:
   n_bootstrap: 200
@@ -68,3 +82,6 @@ data:
   contact_points: "data/contact_points.parquet"
   borrowers: "data/borrowers.parquet"
   policy_log: "data/policy_log.parquet"       # eval-only; models must never read
+  splits: "data/splits.csv"                   # official account splits (routing only)
+  verified_gold: "data/verified_gold.parquet" # 250 checks; eval-only, scoring-only
+  datasets_dir: "datasets"                    # official extracts (read-only; 1/k check needs phones.csv)

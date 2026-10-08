@@ -9,11 +9,23 @@ P5 additions:
 - 1/k propensity validation on the random arm before IPS weights are trusted
 - ECE per segment + reliability tables in report
 - IPW second view with validation receipt logged
+Data discipline (P3, enforced here):
+- Baselines fit on TRAIN-split frames ONLY (train window x TRAIN accounts).
+  Validation-split rows in the same window may select GBM hyperparameters
+  (fixed grid, validation logloss); the test split and the verified-250 gold
+  are scoring-only: no fitting, no early-stopping, no threshold tuning.
+- Account snapshot numerics (as-of unconfirmed) are quarantined via
+  ``features.quarantine_snapshot`` (CLI ``--quarantine-snapshot on|off``
+  overrides): dropped from fit AND score frames consistently. Run with AND
+  without and report both.
+- Candidate refs are intersected with the contact-points table so payment
+  pseudo-refs (hash of account_id, never diallable) never enter frames.
 """
 
 from __future__ import annotations
 
 import argparse
+import itertools
 from datetime import datetime
 from pathlib import Path
 
@@ -24,6 +36,7 @@ import yaml
 from src.rpc.eval import metrics as M
 from src.rpc.eval._minifeatures import get_feature_builder
 from src.rpc.eval.labels import observed_labels
+from src.rpc.eval.propensity import fit_propensity, ipw_view, propensity_weights
 from src.rpc.eval.registry import get_scorer, list_scorers, register_builtin_baselines
 from src.rpc.eval.report import generate_report
 from src.rpc.eval.splits import check_splits, default_first_asof, make_rolling_splits
@@ -31,10 +44,73 @@ from src.rpc.models.calibration import SegmentCalibrator, CalibrationConfig, DEF
 from src.rpc.models.propensity import DialPropensityModel, PropensityConfig, PropensityValidationError
 from src.rpc.eval.propensity import ipw_view, fit_propensity as eval_fit_propensity, propensity_weights as eval_propensity_weights
 
+# Account snapshot numerics whose as-of is unconfirmed (audit §6, guidelines
+# §3): no timestamp column, consistent-with-start-of-window but unproven.
+# Quarantined until CN confirms: dropped pre-fit AND pre-score when the flag
+# is on. Descriptors (product, bureau_score_band, income_type,
+# preferred_language, town_id) stay: population descriptors, not snapshots.
+SNAPSHOT_NUMERICS = frozenset([
+    "dpd_bucket",
+    "dpd_start",
+    "outstanding",
+    "overdue_start",
+    "emi_amount",
+    "other_active_loans",
+    "paid_other_lenders_30d",
+    "last_bounce_reason",
+])
+
 
 def _load(path: str) -> pd.DataFrame | None:
     p = Path(path)
     return pd.read_parquet(p) if p.exists() else None
+
+
+def _ref_account_map(events: pd.DataFrame) -> pd.Series:
+    """Modal account per contact ref from dial/disposition exposure.
+
+    Deterministic: most exposure events wins, ties break to the smallest
+    account_id. Shared phones spanning accounts/splits are routed to one
+    account and counted by callers (audit §2 grain hazard, noted in report).
+    """
+    ev = events[events["event_type"].isin(["dial_attempt", "disposition"])].copy()
+    if ev.empty:
+        return pd.Series(dtype="string")
+    counts = ev.groupby(["contact_point_ref", "account_id"], sort=False).size()
+    counts = counts.reset_index(name="_n").sort_values(
+        ["contact_point_ref", "_n", "account_id"], ascending=[True, False, True]
+    )
+    best = counts.drop_duplicates(subset=["contact_point_ref"], keep="first")
+    return best.set_index("contact_point_ref")["account_id"].astype("string")
+
+
+def _apply_quarantine(
+    frame: pd.DataFrame, active: bool
+) -> tuple[pd.DataFrame, list[str]]:
+    """Drop snapshot numerics from a fit/score frame when quarantining."""
+    if not active:
+        return frame, []
+    drop = [c for c in frame.columns if c in SNAPSHOT_NUMERICS]
+    if not drop:
+        return frame, []
+    return frame.drop(columns=drop), drop
+
+
+def _dedupe_refs(feats: pd.DataFrame, ref_acct: pd.Series) -> pd.DataFrame:
+    """One row per contact ref (modal account wins, first-row tiebreak).
+
+    The real feature layer emits linkage-grain rows, so a phone shared
+    across accounts yields several rows per ref. Eval scores and fits
+    per-ref: keep the modal account's row for consistency with split
+    routing (audit §2 grain hazard, noted in the report).
+    """
+    if feats.empty or "contact_point_ref" not in feats.columns:
+        return feats
+    if "account_id" in feats.columns:
+        modal = feats["contact_point_ref"].map(ref_acct)
+        keep = modal.isna() | (feats["account_id"].astype("string") == modal.astype("string"))
+        feats = feats[keep].copy()
+    return feats.drop_duplicates(subset=["contact_point_ref"], keep="first").reset_index(drop=True)
 
 
 def _train_frame(
@@ -47,15 +123,27 @@ def _train_frame(
     rpc_responses: list,
     rpc_dispositions: list,
     builder: object,
+    allowed_refs: set[str],
+    ref_acct: pd.Series,
 ) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
-    """Features at train_end + observed labels in the post-train window (dialled only)."""
+    """Features at train_end + observed labels in the post-train window (dialled only).
+
+    Candidates are window refs intersected with ``allowed_refs`` (official
+    split routing + contact-points universe). Returns the dialled-only frame,
+    labels, and refs.
+    """
     ev = events.copy()
     ev["occurred_at"] = pd.to_datetime(ev["occurred_at"], utc=True)
     cands = ev[
         (ev["occurred_at"] > pd.to_datetime(train_start, utc=True))
         & (ev["occurred_at"] <= pd.to_datetime(train_end, utc=True))
     ]["contact_point_ref"].unique().tolist()
+    cands = [c for c in cands if c in allowed_refs]
+    if not cands:
+        empty = pd.DataFrame({"contact_point_ref": pd.Series(dtype="string")})
+        return empty, pd.Series(dtype=float), pd.Series(dtype="string")
     feats = builder(train_end, cands, ev, cps, borrowers)  # type: ignore[operator]
+    feats = _dedupe_refs(feats, ref_acct)
     lab = observed_labels(ev, train_end, cands, horizon_days, rpc_responses, rpc_dispositions)
     fr = feats.merge(lab, on="contact_point_ref", how="left")
     fr = fr[~fr["censored"]].copy()  # dialled-only training; flagged in report
@@ -63,13 +151,121 @@ def _train_frame(
     return fr, y, fr["contact_point_ref"]
 
 
+def _logloss_of(y_true: np.ndarray, p_pred: np.ndarray) -> float:
+    try:
+        return M.logloss(y_true, p_pred)
+    except Exception:
+        return float("nan")
+
+
+def _select_params(
+    kind: str,
+    base_params: dict,
+    grid: dict,
+    tr_feats: pd.DataFrame,
+    tr_y: pd.Series,
+    tr_acc: pd.Series | None,
+    va_feats: pd.DataFrame,
+    va_y: pd.Series,
+    va_acc: pd.Series | None,
+) -> tuple[dict, list[str]]:
+    """Pick GBM hyperparameters on validation rows (same window, disjoint accounts).
+
+    Never touches test or verified refs. Deterministic: ties break to the
+    first (simplest) grid point.
+    """
+    notes: list[str] = []
+    if va_feats.empty or not grid:
+        return dict(base_params), notes
+    keys = sorted(grid)
+    best: dict | None = None
+    best_ll = float("inf")
+    for vals in itertools.product(*(grid[k] for k in keys)):
+        cand = dict(base_params)
+        cand.update(dict(zip(keys, vals)))
+        try:
+            if kind == "account_gbm":
+                sc = get_scorer("account_gbm")
+                sc.set_params(cand)  # type: ignore[union-attr]
+                sc.fit(tr_feats, tr_y, tr_acc)  # type: ignore[union-attr]
+                sc.attach_context(  # type: ignore[union-attr]
+                    pd.DataFrame({"contact_point_ref": va_feats["contact_point_ref"],
+                                  "account_id": np.asarray(va_acc)}),
+                    va_feats,
+                )
+            else:
+                sc = get_scorer("contact_gbm")
+                sc.set_params(cand)  # type: ignore[union-attr]
+                sc.fit(tr_feats, tr_y)  # type: ignore[union-attr]
+                sc.attach_features(va_feats)  # type: ignore[union-attr]
+            import datetime as _dt
+
+            pred = sc.score(_dt.datetime.now(_dt.timezone.utc),  # type: ignore[union-attr]
+                            va_feats["contact_point_ref"].tolist())
+            ll = _logloss_of(np.asarray(va_y, dtype=float),
+                             pred["p_rpc"].to_numpy(float))
+        except Exception as e:
+            notes.append(f"{kind} grid {vals}: failed ({e}); skipped.")
+            continue
+        if np.isfinite(ll) and ll < best_ll:
+            best_ll, best = ll, cand
+    if best is None:
+        notes.append(f"{kind}: all grid points failed; using configured params.")
+        return dict(base_params), notes
+    notes.append(f"{kind}: selected {best} (validation logloss {best_ll:.4f}, "
+                 f"n_val={len(va_y)}).")
+    return best, notes
+
+
+def _check_1k(policy_log: pd.DataFrame, datasets_dir: str | None) -> str:
+    """Validate selection_propensity == 1/k on the random arm (eval-only).
+
+    k = phone linkages of the account with added_date <= attempt time
+    (linkage-time exposure set, not the end-of-window count). Decimal-stored
+    propensities (0.3333) get a 1e-3 tolerance.
+    """
+    try:
+        rnd = policy_log[policy_log["dialling_arm"] == "random_contact_point"].copy()
+        if rnd.empty:
+            return "random arm absent: 1/k check skipped."
+        if datasets_dir is None:
+            return f"random arm: n_attempts={len(rnd)} (no datasets dir: k check skipped)."
+        phones = pd.read_csv(Path(datasets_dir) / "phones.csv", dtype="string")
+        phones["added_date"] = pd.to_datetime(phones["added_date"], utc=True)
+        rnd["occurred_at"] = pd.to_datetime(rnd["occurred_at"], utc=True)
+        p = pd.to_numeric(rnd["selection_propensity"], errors="coerce")
+        k_hat = (1.0 / p).round()
+        exact = ((p - 1.0 / k_hat).abs() < 1e-3) & k_hat.between(1, 8)
+        hit = []
+        for acc, g in rnd.groupby("account_id"):
+            added = phones.loc[phones["account_id"] == acc, "added_date"].sort_values().to_numpy()
+            ts = g["occurred_at"].to_numpy()
+            k_true = np.searchsorted(added, ts, side="right")
+            kh = k_hat.loc[g.index].to_numpy()
+            hit.extend(list(kh == k_true))
+        hit = np.asarray(hit, dtype=float)
+        return (f"random arm: n_attempts={len(rnd)}, 1/k-exact={float(exact.mean()):.3f}, "
+                f"k==linkage-time-phones share={float(hit.mean()):.3f}.")
+    except Exception as e:
+        return f"1/k check failed: {e}"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="configs/eval.yaml")
+    ap.add_argument("--quarantine-snapshot", choices=["on", "off"], default=None,
+                    help="override features.quarantine_snapshot")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
     sp, lb, mc, dc, inc = cfg["splits"], cfg["labels"], cfg["metrics"], cfg["data"], cfg["incumbent"]
     prop_cfg = cfg.get("propensity", {})
+    feat_cfg = cfg.get("features", {})
+    base_cfg = cfg.get("baselines", {})
+    quarantine = feat_cfg.get("quarantine_snapshot", True)
+    if args.quarantine_snapshot is not None:
+        quarantine = args.quarantine_snapshot == "on"
+    tune = bool(base_cfg.get("tune_on_validation", False))
+    grid = {k: list(v) for k, v in dict(base_cfg.get("grid", {})).items()}
 
     events = _load(dc["events"])
     cps = _load(dc["contact_points"])
@@ -80,12 +276,61 @@ def main() -> None:
             f"no events at {dc['events']}; ingest the official extracts "
             "first (see docs/dataset_audit.md §13)"
         )
+    cp_refs = set(cps["contact_point_ref"]) if cps is not None else set(events["contact_point_ref"])
+    ref_acct = _ref_account_map(events)
+
+    # Official account splits: fit routing (TRAIN only) + test-refs scoring.
+    split_of: dict[str, str] = {}
+    if dc.get("splits") and Path(dc["splits"]).exists():
+        sdf = pd.read_csv(dc["splits"], dtype="string")
+        split_of = dict(zip(sdf["account_id"], sdf["split"]))
+    use_splits = bool(split_of)
+    verified = _load(dc["verified_gold"]) if dc.get("verified_gold") else None
+    ver_status: dict[str, str] = {}
+    if verified is not None and not verified.empty:
+        ver_status = dict(zip(verified["contact_point_ref"], verified["verified_status"]))
+
+    def _split(refs: list[str]) -> list[str]:
+        if not use_splits:
+            return refs
+        return [r for r in refs if split_of.get(str(ref_acct.get(r, "")), "") == "test"]
+
+    def _allowed(split_name: str) -> set[str]:
+        return {r for r in cp_refs
+                if split_of.get(str(ref_acct.get(r, "")), "") == split_name} if use_splits else set(cp_refs)
+
+    train_allowed = _allowed("train") | (set(cp_refs) if not use_splits else set())
+    if use_splits:
+        train_allowed |= _allowed("validation")  # train window carries validation rows for tuning
+
+    cross_split = 0
+    if use_splits and cps is not None:
+        per_ref = events[events["event_type"].isin(["dial_attempt", "disposition"])]
+        if not per_ref.empty:
+            n_splits = per_ref.groupby("contact_point_ref")["account_id"].apply(
+                lambda s: s.map(split_of).nunique())
+            cross_split = int((n_splits > 1).sum())
 
     notes = [
         "Metrics are DIALLED-ONLY unless noted: undialled contact points are censored (no observable outcome).",
+        f"Fit discipline: GBMs fit on TRAIN-split frames only"
+        f"{' (official splits.csv)' if use_splits else ' (no splits file: split routing off)'}; "
+        "validation rows (same window, disjoint accounts) select GBM hyperparameters; "
+        "test split + verified-250 gold are scoring-only.",
+        f"Snapshot quarantine {'ON' if quarantine else 'OFF'}: "
+        f"{sorted(SNAPSHOT_NUMERICS) if quarantine else 'snapshot numerics INCLUDED as model inputs'}.",
+        f"Labels: observed rpc_next_7d, responses={lb['rpc_network_responses']}, "
+        f"dispositions={lb['rpc_dispositions']} (eval.yaml; features.yaml family also "
+        "counts 'dispute' — 139 rpc_dispute rows differ; label set unchanged pending sign-off).",
+        f"Shared-phone routing: {cross_split} dialled refs observed under accounts in "
+        "multiple official splits (routed by modal account; noted, not re-split).",
     ]
     if policy_log is None:
         notes.append("policy_log.parquet absent: IPW second view skipped.")
+    elif dc.get("policy_log") and Path(dc["policy_log"]).exists():
+        _dd = dc.get("datasets_dir", "datasets")
+        notes.append("Propensity 1/k check (random arm): "
+                     + _check_1k(policy_log, _dd if Path(_dd, "phones.csv").exists() else None))
 
     builder = get_feature_builder()
     from src.rpc.eval import _minifeatures as _mf
@@ -106,47 +351,112 @@ def main() -> None:
 
     # Per-split test frames (features at as_of + labels after embargo).
     per_model_rows: dict[str, list[pd.DataFrame]] = {m: [] for m in model_names}
+    per_model_ver: dict[str, list[pd.DataFrame]] = {m: [] for m in model_names}
+    per_model_train: dict[str, list[pd.DataFrame]] = {m: [] for m in model_names}
+    per_model_val: dict[str, list[pd.DataFrame]] = {m: [] for m in model_names}
+    prop_frames: list[pd.DataFrame] = []  # test feats + dialled flag for IPW
+    n_train_rows: list[int] = []
     for s in splits:
         ev = events.copy()
         ev["occurred_at"] = pd.to_datetime(ev["occurred_at"], utc=True)
-        test_refs = ev[
+        win_refs = ev[
             (ev["occurred_at"] > pd.to_datetime(s.test_start, utc=True))
             & (ev["occurred_at"] <= pd.to_datetime(s.test_end, utc=True))
         ]["contact_point_ref"].unique().tolist()
-        if not test_refs:
+        win_refs = [r for r in win_refs if r in cp_refs]
+        test_refs = [r for r in win_refs if (not use_splits or r in _allowed("test"))]
+        ver_refs = [r for r in win_refs if r in ver_status] if ver_status else []
+        if not test_refs and not ver_refs:
             continue
-        feats = builder(s.as_of, test_refs, ev, cps, borrowers)  # type: ignore[operator]
-        lab = observed_labels(ev, s.test_start, test_refs, lb["horizon_days"], lb["rpc_network_responses"], lb["rpc_dispositions"])
+        build_refs = list(dict.fromkeys([*test_refs, *ver_refs]))
+        feats = builder(s.as_of, build_refs, ev, cps, borrowers)  # type: ignore[operator]
+        feats = _dedupe_refs(feats, ref_acct)
+        feats, qdrop = _apply_quarantine(feats, quarantine)
+        if qdrop and len(n_train_rows) == 0:
+            notes.append(f"Quarantined snapshot columns dropped from frames: {sorted(qdrop)}.")
+        lab = observed_labels(ev, s.test_start, build_refs, lb["horizon_days"], lb["rpc_network_responses"], lb["rpc_dispositions"])
         base = feats.merge(lab, on="contact_point_ref", how="left")
         base_eval = base[~base["censored"]].copy()
+        test_eval = base_eval[base_eval["contact_point_ref"].isin(set(test_refs))].copy()
+        ver_eval = base_eval[base_eval["contact_point_ref"].isin(set(ver_refs))].copy()
 
-        tr_feats, tr_y, _ = _train_frame(ev, cps, borrowers, s.train_start, s.train_end, lb["horizon_days"], lb["rpc_network_responses"], lb["rpc_dispositions"], builder)
-        acc_map = None
+        tr_feats, tr_y, _ = _train_frame(ev, cps, borrowers, s.train_start, s.train_end, lb["horizon_days"], lb["rpc_network_responses"], lb["rpc_dispositions"], builder, train_allowed, ref_acct)
+        tr_feats, _ = _apply_quarantine(tr_feats, quarantine)
+        tr_acc = None
+        if not tr_feats.empty:
+            tr_acc = tr_feats["contact_point_ref"].map(ref_acct).fillna("UNK").astype("string")
+            tr_split = tr_acc.map(split_of).fillna("") if use_splits else pd.Series("train", index=tr_acc.index)
+            fit_mask = (tr_split == "train").to_numpy() if use_splits else np.ones(len(tr_feats), bool)
+            va_mask = (tr_split == "validation").to_numpy() if use_splits else np.zeros(len(tr_feats), bool)
+        else:
+            fit_mask = np.zeros(0, bool)
+            va_mask = np.zeros(0, bool)
+        n_train_rows.append(int(fit_mask.sum()))
+
+        # Modal account per ref (unique): linkage-grain tables repeat shared
+        # phones across accounts, which would explode ref-joins below.
+        acc_map = pd.DataFrame({
+            "contact_point_ref": list(ref_acct.index),
+            "account_id": pd.Series(np.asarray(ref_acct), dtype="string"),
+        })
         if cps is not None and "account_id" in cps.columns:
-            acc_map = cps[["contact_point_ref", "account_id"]]
-        elif "account_id" in ev.columns:
-            acc_map = ev[["contact_point_ref", "account_id"]].drop_duplicates()
+            extra = (cps[["contact_point_ref", "account_id"]]
+                     .drop_duplicates()
+                     .sort_values(["contact_point_ref", "account_id"])
+                     .drop_duplicates(subset=["contact_point_ref"], keep="first"))
+            extra = extra[~extra["contact_point_ref"].isin(set(acc_map["contact_point_ref"]))]
+            acc_map = pd.concat([acc_map, extra], ignore_index=True)
 
         scorers: dict[str, object] = {}
         inc = get_scorer("incumbent")
         inc.attach_features(feats)  # type: ignore[union-attr]
         scorers["incumbent"] = inc
-        if not tr_feats.empty and tr_y.notna().any() and tr_y.nunique() >= 2:
-            agb = get_scorer("account_gbm")
+        fit_y = tr_y[np.asarray(fit_mask[: len(tr_y)])] if len(tr_y) else tr_y
+        f_feats: pd.DataFrame | None = None
+        v_feats: pd.DataFrame | None = None
+        if (not tr_feats.empty and len(fit_y) and fit_y.notna().any()
+                and fit_y.nunique() >= 2):
+            f_feats = tr_feats[np.asarray(fit_mask[: len(tr_feats)])].reset_index(drop=True)
+            f_y = tr_y[np.asarray(fit_mask[: len(tr_y)])].reset_index(drop=True)
+            f_acc = tr_acc[np.asarray(fit_mask[: len(tr_acc)])].reset_index(drop=True) if tr_acc is not None else None
+            v_feats = tr_feats[np.asarray(va_mask[: len(tr_feats)])].reset_index(drop=True)
+            v_y = tr_y[np.asarray(va_mask[: len(tr_y)])].reset_index(drop=True)
+            v_acc = tr_acc[np.asarray(va_mask[: len(tr_acc)])].reset_index(drop=True) if tr_acc is not None else None
+            # The real feature layer already emits account_id, so the merge
+            # may suffix columns (account_id_x/y). Coalesce all variants.
             if acc_map is not None:
-                # The real feature layer already emits account_id, so the merge
-                # may suffix columns (account_id_x/y). Coalesce all variants.
-                _m = tr_feats.merge(acc_map, on="contact_point_ref", how="left")
+                _m = f_feats.merge(acc_map, on="contact_point_ref", how="left")
                 _parts = [_m[c] for c in ("account_id", "account_id_y", "account_id_x") if c in _m.columns]
-                tr_acc = _parts[0]
+                f_acc = _parts[0]
                 for _p in _parts[1:]:
-                    tr_acc = tr_acc.fillna(_p)
-                tr_acc = tr_acc.fillna("UNK")
-                agb.fit(tr_feats, tr_y, tr_acc)  # type: ignore[union-attr]
-                agb.attach_context(pd.DataFrame({"contact_point_ref": test_refs}).merge(acc_map, on="contact_point_ref", how="left").fillna("UNK"))  # type: ignore[union-attr]
+                    f_acc = f_acc.fillna(_p)
+                f_acc = f_acc.fillna("UNK")
+            else:
+                f_acc = f_acc.fillna("UNK") if f_acc is not None else f_acc
+            params_a: dict = dict(base_cfg.get("account_gbm", {}))
+            params_c: dict = dict(base_cfg.get("contact_gbm", {}))
+            if tune and not v_feats.empty and v_y.notna().any():
+                params_a, tune_notes = _select_params(
+                    "account_gbm", params_a, grid, f_feats, f_y, f_acc,
+                    v_feats, v_y, v_acc)
+                notes.extend(f"split {s.as_of.date()}: {t}" for t in tune_notes)
+                params_c, tune_notes = _select_params(
+                    "contact_gbm", params_c, grid, f_feats, f_y, None,
+                    v_feats, v_y, None)
+                notes.extend(f"split {s.as_of.date()}: {t}" for t in tune_notes)
+            agb = get_scorer("account_gbm")
+            agb.set_params(params_a)  # type: ignore[union-attr]
+            agb.fit(f_feats, f_y, f_acc)  # type: ignore[union-attr]
+            # Score-time PIT features ride along so accounts unseen in
+            # training (all of them under account-disjoint splits) are scored
+            # by the fitted model, not the global mean.
+            _ctx = pd.DataFrame({"contact_point_ref": build_refs})
+            _ctx = _ctx.merge(acc_map, on="contact_point_ref", how="left").fillna("UNK") if acc_map is not None else _ctx.assign(account_id="UNK")
+            agb.attach_context(_ctx, feats)  # type: ignore[union-attr]
             scorers["account_gbm"] = agb
             cgb = get_scorer("contact_gbm")
-            cgb.fit(tr_feats, tr_y)  # type: ignore[union-attr]
+            cgb.set_params(params_c)  # type: ignore[union-attr]
+            cgb.fit(f_feats, f_y)  # type: ignore[union-attr]
             cgb.attach_features(feats)  # type: ignore[union-attr]
             scorers["contact_gbm"] = cgb
         else:
@@ -301,24 +611,98 @@ def main() -> None:
             if c not in base_eval.columns:
                 base_eval[c] = "unknown"
         
-        # Score with calibration applied
-        for name, sc in scorers.items():
-            pred = sc.score(s.as_of, base_eval["contact_point_ref"].tolist())  # type: ignore[union-attr]
-            cal = calibrators.get(name)
+        # Refresh scoring slices from base_eval so they carry the P5
+        # segment columns (they were cut before seg cols were added).
+        test_eval = base_eval[base_eval["contact_point_ref"].isin(set(test_refs))].copy()
+        ver_eval = base_eval[base_eval["contact_point_ref"].isin(set(ver_refs))].copy()
+
+        def _calibrated(pred_df: pd.DataFrame, seg_df: pd.DataFrame, model_name: str) -> pd.DataFrame:
+            cal = calibrators.get(model_name)
             if cal is not None:
-                # Apply calibration to predictions
-                seg_df = base_eval[seg_cols]
-                p_cal = cal.predict(pred["p_rpc"].to_numpy(), seg_df)
-                pred = pred.copy()
-                pred["p_rpc"] = np.clip(p_cal, 0.01, 0.99)
-            # Add segment column to merged result for per-segment ECE tracking
-            merged = base_eval.merge(pred, on="contact_point_ref", how="left")
-            merged["segment"] = merged[seg_cols].astype(str).agg("|".join, axis=1)
-            per_model_rows.setdefault(name, []).append(merged)
+                try:
+                    p_cal = cal.predict(pred_df["p_rpc"].to_numpy(), seg_df)
+                    pred_df = pred_df.copy()
+                    pred_df["p_rpc"] = np.clip(p_cal, 0.01, 0.99)
+                except Exception:
+                    pass
+            return pred_df
+
+        # Score with calibration applied (P5) on the scoring-only slices (P3)
+        for name, sc in scorers.items():
+            if not test_eval.empty:
+                pred = sc.score(s.as_of, test_eval["contact_point_ref"].tolist())  # type: ignore[union-attr]
+                pred = _calibrated(pred, test_eval[seg_cols], name)
+                _m = test_eval.merge(pred, on="contact_point_ref", how="left")
+                _m["segment"] = _m[seg_cols].astype(str).agg("|".join, axis=1)
+                per_model_rows.setdefault(name, []).append(_m)
+            if not ver_eval.empty:
+                pred_v = sc.score(s.as_of, ver_eval["contact_point_ref"].tolist())  # type: ignore[union-attr]
+                pred_v = _calibrated(pred_v, ver_eval[seg_cols], name)
+                _mv = ver_eval.merge(pred_v, on="contact_point_ref", how="left")
+                _mv["segment"] = _mv[seg_cols].astype(str).agg("|".join, axis=1)
+                per_model_ver.setdefault(name, []).append(_mv)
+            # Fit check (train = in-sample incl. seen-account replay for
+            # account_gbm; validation = selection rows, mildly optimistic).
+            # Scorers hold TEST-origin features at this point, so re-attach
+            # the slice frame before scoring it. Safe: test/ver scores for
+            # this origin are already stored, and every origin re-attaches.
+            if f_feats is not None and not f_feats.empty:
+                try:
+                    _tr_refs = f_feats["contact_point_ref"].tolist()
+                    _tr_ctx = pd.DataFrame({
+                        "contact_point_ref": _tr_refs,
+                        "account_id": pd.Series(_tr_refs).map(ref_acct).fillna("UNK").astype("string"),
+                    })
+                    if name == "account_gbm":
+                        sc.attach_context(_tr_ctx, f_feats)  # type: ignore[union-attr]
+                    else:
+                        sc.attach_features(f_feats)  # type: ignore[union-attr]
+                    _ptr = sc.score(s.as_of, _tr_refs)  # type: ignore[union-attr]
+                    _tr = f_feats[["contact_point_ref", "rpc_next_7d"]].merge(
+                        _ptr, on="contact_point_ref", how="left")
+                    per_model_train.setdefault(name, []).append(_tr)
+                except Exception:
+                    pass
+            if v_feats is not None and not v_feats.empty:
+                try:
+                    _va_refs = v_feats["contact_point_ref"].tolist()
+                    _va_ctx = pd.DataFrame({
+                        "contact_point_ref": _va_refs,
+                        "account_id": pd.Series(_va_refs).map(ref_acct).fillna("UNK").astype("string"),
+                    })
+                    if name == "account_gbm":
+                        sc.attach_context(_va_ctx, v_feats)  # type: ignore[union-attr]
+                    else:
+                        sc.attach_features(v_feats)  # type: ignore[union-attr]
+                    _pv = sc.score(s.as_of, _va_refs)  # type: ignore[union-attr]
+                    _va = v_feats[["contact_point_ref", "rpc_next_7d"]].merge(
+                        _pv, on="contact_point_ref", how="left")
+                    per_model_val.setdefault(name, []).append(_va)
+                except Exception:
+                    pass
+        if prop_cfg.get("enabled", True):
+            # IPW population = ALL known refs (dialled + undialled in the
+            # window), not just window refs: the propensity model needs both
+            # classes to re-weight dialled outcomes toward the all-CP view.
+            extra_refs = [r for r in cp_refs if r not in set(build_refs)]
+            if extra_refs:
+                ifeats = builder(s.as_of, extra_refs, ev, cps, borrowers)  # type: ignore[operator]
+                ifeats = _dedupe_refs(ifeats, ref_acct)
+                ifeats, _ = _apply_quarantine(ifeats, quarantine)
+                fall = pd.concat([feats, ifeats], ignore_index=True)
+            else:
+                fall = feats
+            all_refs = fall["contact_point_ref"].tolist()
+            lab_all = observed_labels(ev, s.test_start, all_refs, lb["horizon_days"],
+                                      lb["rpc_network_responses"], lb["rpc_dispositions"])
+            pall = fall.merge(lab_all, on="contact_point_ref", how="left")
+            pall["dialled"] = (~pall["censored"]).astype(int)
+            prop_frames.append(pall)
 
     # --- Aggregate + metric families ---
     tables: dict[str, object] = {"discrimination": [], "calibration": [], "rare_event": [],
-                                 "decision": [], "avoiding_vs_invalid": [], "propensity": []}
+                                 "decision": [], "avoiding_vs_invalid": [], "propensity": [],
+                                 "verified_gold": [], "cross_line": [], "fit_check": []}
     reliability: dict[str, list] = {}
     # P5: per-segment calibration tracking
     segment_reliability: dict[str, dict] = {}
@@ -359,6 +743,23 @@ def main() -> None:
         order = np.argsort(-np.nan_to_num(p))
         tables["decision"].append({"model": name, "n": int((~np.isnan(y)).sum()),
             "rpc_per_1000_dials": round(M.rpc_per_1000(y[order], mc["rpc_top_n"]), 1)})
+        # Cross-line subset: silent line while the borrower was reachable elsewhere.
+        # Observed window labels here are structurally ~all-zero (silent is
+        # defined as never-answered over full history), so AUC is
+        # uncomputable; the bar is obs_rate + mean score (lower is better:
+        # do not waste dials on lines that never connect).
+        try:
+            cl = M.cross_line_subset(events, tuple(lb["rpc_network_responses"]))
+            silent = set(cl["silent_ref"]) if not cl.empty else set()
+            sub = df[df["contact_point_ref"].isin(silent)]
+            sy, spp = sub["rpc_next_7d"].to_numpy(float), sub["p_rpc"].to_numpy(float)
+            tables["cross_line"].append({"model": name, "n": int((~np.isnan(sy)).sum()),
+                "obs_rate": round(float(np.nanmean(sy)), 4) if len(sy) else float("nan"),
+                "mean_p_rpc": round(float(np.nanmean(spp)), 4) if len(spp) else float("nan")})
+        except Exception as e:
+            tables["cross_line"].append({"model": name, "n": 0,
+                "obs_rate": float("nan"), "mean_p_rpc": float("nan"),
+                "note": f"failed: {e}"})
 
     tables["reliability"] = reliability
     tables["segment_reliability"] = segment_reliability
@@ -446,10 +847,116 @@ def main() -> None:
             except Exception as e:
                 notes.append(f"IPW view failed: {e}")
                 tables["propensity"].append({"model": "contact_gbm", "error": str(e)})
+    # Train vs validation vs test (pooled point estimates, no bootstrap):
+    # train = in-sample (GBM overfit + account_gbm seen-account replay);
+    # validation = hyperparameter-selection rows (mildly optimistic);
+    # test = the honest bar.
+    for name in model_names:
+        for slice_name, store in (("train", per_model_train),
+                                  ("validation", per_model_val),
+                                  ("test", per_model_rows)):
+            frames = store.get(name, [])
+            if not frames:
+                continue
+            df = pd.concat(frames, ignore_index=True)
+            y = df["rpc_next_7d"].to_numpy(float)
+            p = df["p_rpc"].to_numpy(float)
+            tables["fit_check"].append({"model": name, "slice": slice_name,
+                "n": int((~np.isnan(y)).sum()),
+                "auc": round(M.roc_auc(y, p), 4), "brier": round(M.brier(y, p), 4),
+                "logloss": round(M.logloss(y, p), 4)})
+    notes.append("Fit check: train rows are in-sample (account_gbm replays seen "
+                 "accounts here, so its train AUC is a replay check, not "
+                 "generalisation); validation rows selected the GBM hyperparameters "
+                 "and are mildly optimistic; test is the honest bar.")
+    # Verified-250 gold, scoring-only: discrimination on dialled verified refs
+    # + score mix by verified_status (descriptive; never a threshold/decision).
+    for name, frames in per_model_ver.items():
+        if not frames:
+            continue
+        df = pd.concat(frames, ignore_index=True).drop_duplicates("contact_point_ref")
+        df["verified_status"] = df["contact_point_ref"].map(ver_status).fillna("unknown")
+        y = df["rpc_next_7d"].to_numpy(float)
+        p = df["p_rpc"].to_numpy(float)
+        tables["verified_gold"].append({"model": name, "slice": "all_dialled",
+            "n": int((~np.isnan(y)).sum()),
+            "auc": round(M.roc_auc(y, p), 4), "brier": round(M.brier(y, p), 4),
+            "logloss": round(M.logloss(y, p), 4),
+            "mean_p_rpc": round(float(np.nanmean(p)), 4),
+            "obs_rate": round(float(np.nanmean(y)), 4)})
+        for status, g in df.groupby("verified_status"):
+            gy, gp = g["rpc_next_7d"].to_numpy(float), g["p_rpc"].to_numpy(float)
+            tables["verified_gold"].append({"model": name, "slice": str(status),
+                "n": int((~np.isnan(gy)).sum()),
+                "auc": round(M.roc_auc(gy, gp), 4),
+                "brier": round(M.brier(gy, gp), 4),
+                "logloss": round(M.logloss(gy, gp), 4),
+                "mean_p_rpc": round(float(np.nanmean(gp)), 4),
+                "obs_rate": round(float(np.nanmean(gy)), 4)})
+    if ver_status:
+        notes.append("Verified gold (250 checks, 2026-07-02 post-observation): scoring-only; "
+                     "66/250 never dialled (censored from dialled-only rows, audit §4). "
+                     "Status mix is descriptive — no thresholds, no auto-decision (compliance).")
+    else:
+        notes.append("verified_gold absent: verified slice skipped.")
+    # Rare-event / avoiding-vs-invalid: baselines emit no recycled_risk or
+    # state posteriors and the extracts carry no true_state annotations, so
+    # these families stay empty by design (reserved for the state tracker).
+    notes.append("Rare-event (recycled): empty — baselines emit no recycled_risk and true "
+                 "recycled status is UNKNOWN (proxies only, audit §8); thresholds live in "
+                 "the decision layer cost-ratio rule, never here.")
+    notes.append("Avoiding-vs-invalid: empty — baselines emit no state posteriors and the "
+                 "issued extracts carry no true_state annotations (ask-CN #8).")
+
+    # IPW second view if policy log exists.
+    if policy_log is not None and prop_cfg.get("enabled", True) and prop_frames:
+        try:
+            import warnings
+
+            from src.rpc.models.baselines._gbm_common import to_matrix as _to_matrix
+
+            pall = pd.concat(prop_frames, ignore_index=True).drop_duplicates("contact_point_ref")
+            if pall["dialled"].nunique() < 2:
+                notes.append("IPW view skipped: test-window refs single-class "
+                             f"(all dialled={int(pall['dialled'].iloc[0])}); "
+                             "propensity needs dialled + undialled refs.")
+            else:
+                # "dialled" is the propensity target, never an input.
+                Xp, _ = _to_matrix(pall.drop(columns=["dialled"]))
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", message="X does not have valid feature names")
+                    clf = fit_propensity(pd.DataFrame(Xp), pall["dialled"].to_numpy(int))
+                    w_all = pd.Series(propensity_weights(clf, pd.DataFrame(Xp),
+                                                        prop_cfg.get("min_prob", 0.05),
+                                                        prop_cfg.get("max_prob", 0.95)),
+                                      index=pall.index)
+                notes.append("IPW view: propensity P(dialled-in-window|features) fit on pooled "
+                             "per-origin frames over ALL known refs (dialled + undialled; "
+                             "deduped across origins); weights 1/p clipped "
+                             f"to [{prop_cfg.get('min_prob', 0.05)},{prop_cfg.get('max_prob', 0.95)}].")
+                for name, frames in per_model_rows.items():
+                    if not frames:
+                        continue
+                    df = pd.concat(frames, ignore_index=True)
+                    w = df["contact_point_ref"].map(
+                        dict(zip(pall["contact_point_ref"], w_all))).fillna(1.0).to_numpy(float)
+                    y = df["rpc_next_7d"].to_numpy(float)
+                    p = df["p_rpc"].to_numpy(float)
+                    from src.rpc.eval.propensity import ipw_view as _ipw
+
+                    view = _ipw(y, p, w)
+                    tables["propensity"].append({"model": name, "n": int((~np.isnan(y)).sum()),
+                        "auc_dialled": round(view["auc_dialled"], 4),
+                        "brier_dialled": round(view["brier_dialled"], 4),
+                        "brier_ipw": round(view["brier_ipw"], 4)})
+        except Exception as e:
+            notes.append(f"IPW view failed: {e}")
 
     results = {
-        "config_summary": f"splits={sp['n_splits']}x{sp['step_days']}d train={sp['train_days']}d embargo={sp['embargo_days']}d test={sp['test_days']}d horizon={lb['horizon_days']}d",
-        "data_summary": f"events={len(events)} splits_scored={len(splits)}",
+        "config_summary": f"splits={sp['n_splits']}x{sp['step_days']}d train={sp['train_days']}d embargo={sp['embargo_days']}d test={sp['test_days']}d horizon={lb['horizon_days']}d quarantine_snapshot={quarantine} tune_on_validation={tune}",
+        "data_summary": f"events={len(events)} splits_scored={len(splits)} "
+                        f"train_fit_rows_total={sum(n_train_rows)} "
+                        f"split_routing={'official splits.csv' if use_splits else 'off'}",
         "notes": notes,
         "tables": tables,
     }

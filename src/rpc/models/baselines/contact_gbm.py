@@ -25,6 +25,15 @@ class ContactGBMScorer:
         self._base_rate = 0.5
         self._features: pd.DataFrame | None = None
 
+    def set_params(self, params: dict) -> "ContactGBMScorer":
+        """Replace hyperparameters (eval uses this for validation selection).
+
+        Rebuilds the unfitted estimator; no data is touched.
+        """
+        self.params = dict(params)
+        self._model = make_lgbm(self.params)
+        return self
+
     def fit(self, features: pd.DataFrame, labels: pd.Series) -> "ContactGBMScorer":
         X, _ = to_matrix(features)
         y = np.asarray(labels, dtype=float)

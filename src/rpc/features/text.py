@@ -97,6 +97,10 @@ def extract_switched_off_months_text(text: str | None) -> int | None:
     count is a digit or Hindi number word and unit is a month/year word.
     Year units convert at 12 months. Returns the max over the text.
     """
+    if text is None or text is pd.NA:
+        return None
+    if isinstance(text, float) and text != text:  # NaN remark cell
+        return None
     if not text:
         return None
     cfg = load_patterns()

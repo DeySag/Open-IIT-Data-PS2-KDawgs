@@ -35,6 +35,20 @@ _NON_FEATURE_COLUMNS = frozenset([
     "event_watermark",
 ])
 
+# Observed-label columns the eval harness merges onto the feature frame
+# before fit. They must never become model inputs: with the real feature
+# layer the generic numeric fallback below would otherwise pick them up
+# (the legacy mini list masked this on fixture data). Fixed here, not in
+# tests: the leakage tripwire stays strict.
+_LABEL_COLUMNS = frozenset([
+    "rpc_next_7d",
+    "censored",
+    "n_dials_window",
+    "was_dialled_next_7d",
+    "_y",
+    "_acc",
+])
+
 
 def to_matrix(features: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
     """Select model columns: legacy mini columns when present, else every
@@ -53,6 +67,7 @@ def to_matrix(features: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
         cols = [
             c for c in features.columns
             if c not in _NON_FEATURE_COLUMNS
+            and c not in _LABEL_COLUMNS
             and (
                 pd.api.types.is_any_real_numeric_dtype(features[c].dtype)
                 or pd.api.types.is_bool_dtype(features[c].dtype)
