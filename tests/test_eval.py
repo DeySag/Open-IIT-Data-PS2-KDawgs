@@ -15,6 +15,7 @@ from src.rpc.eval import metrics as M
 from src.rpc.eval.labels import observed_labels
 from src.rpc.eval.report import generate_report
 from src.rpc.eval.splits import check_splits, make_rolling_splits
+from src.rpc.models.baselines.account_gbm import AccountGBMScorer
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -195,3 +196,36 @@ def test_run_cli_end_to_end_on_fixture_data(tmp_path: Path, monkeypatch: pytest.
     out = list((tmp_path / "reports").glob("eval_*.md"))
     assert out, "report markdown not produced"
     assert "test" in out[0].read_text()
+
+
+# --- Account GBM aggregation contract (mean + best line + choice-set size) ---
+
+_BEST_RATE = 0.9
+_N_ACCOUNT_CONTACTS = 3
+
+
+def test_account_aggregation_carries_best_line_and_count() -> None:
+    agg = AccountGBMScorer._aggregate(
+        pd.DataFrame({"answer_rate": [0.1, 0.1, _BEST_RATE], "n_attempts": [5, 5, 5]}),
+        pd.Series(["A0", "A0", "A0"]),
+    )
+    assert agg.loc["A0", "answer_rate_max"] == _BEST_RATE
+    assert agg.loc["A0", "answer_rate_mean"] < _BEST_RATE
+    assert agg.loc["A0", "n_contacts"] == _N_ACCOUNT_CONTACTS
+
+
+def test_account_gbm_unseen_path_uses_same_aggregation() -> None:
+    refs = [f"R{a}{c}" for a in range(6) for c in range(3)]
+    accs = pd.Series([f"A{a}" for a in range(6) for _ in range(3)])
+    feats = pd.DataFrame({"contact_point_ref": refs, "answer_rate": [0.5] * 18,
+                          "n_attempts": [5] * 18})
+    labels = pd.Series([1.0 if a == 0 else 0.0 for a in range(6) for _ in range(3)])
+    sc = AccountGBMScorer({"n_estimators": 10, "seed": 42}).fit(feats, labels, accs)
+    assert set(sc._agg_columns) >= {"answer_rate_max", "n_contacts"}
+    sc.attach_context(
+        pd.DataFrame({"contact_point_ref": feats["contact_point_ref"], "account_id": accs}),
+        feats,
+    )
+    got = sc.score(utc(2026, 5, 1), feats["contact_point_ref"].tolist())
+    assert got["p_rpc"].between(0.0, 1.0).all()
+    assert len(got) == len(feats)

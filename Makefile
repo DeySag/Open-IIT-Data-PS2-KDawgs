@@ -1,7 +1,7 @@
 # Makefile for PS2 RPC
 # Deterministic commands for data, train, eval, test
 
-.PHONY: help install data data-check features train-baselines train-models eval smoke serve lint typecheck test clean
+.PHONY: help install data data-check features train-baselines train-models train-addons eval eval-inputs smoke serve lint typecheck test clean
 
 help:
 	@echo "PS2 RPC - Available commands:"
@@ -42,8 +42,14 @@ train-baselines:
 train-models:
 	python -m src.rpc.models.train --data data/dev.parquet --config configs/state_tracker.yaml --output models/v0/
 
+train-addons:
+	python -m src.rpc.models.train_addons --datasets datasets --out artifacts --fit-cap 2026-05-26
+
 eval:
 	python -m src.rpc.eval.run --config configs/eval.yaml
+
+eval-inputs:
+	python -m src.rpc.eval.prepare --db data/event_store.duckdb --datasets datasets --out-dir data
 
 smoke:
 	python -m src.rpc.serve.smoke_test

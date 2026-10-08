@@ -113,6 +113,19 @@ def _dedupe_refs(feats: pd.DataFrame, ref_acct: pd.Series) -> pd.DataFrame:
     return feats.drop_duplicates(subset=["contact_point_ref"], keep="first").reset_index(drop=True)
 
 
+def _dialled_only(frame: pd.DataFrame) -> pd.DataFrame:
+    """Keep dialled rows; unknown-censored (merge misses) counts as censored.
+
+    A left-merge miss leaves ``censored`` NaN (float) instead of bool and
+    crashes ``~`` — and semantically an unlabelled ref is unknown, never
+    negative, so exclusion is the censored-consistent choice.
+    """
+    if "censored" not in frame.columns:
+        return frame.iloc[0:0].copy()
+    flag = frame["censored"].fillna(True).astype(bool)
+    return frame[(~flag)].copy()
+
+
 def _train_frame(
     events: pd.DataFrame,
     cps: pd.DataFrame | None,
@@ -376,7 +389,7 @@ def main() -> None:
             notes.append(f"Quarantined snapshot columns dropped from frames: {sorted(qdrop)}.")
         lab = observed_labels(ev, s.test_start, build_refs, lb["horizon_days"], lb["rpc_network_responses"], lb["rpc_dispositions"])
         base = feats.merge(lab, on="contact_point_ref", how="left")
-        base_eval = base[~base["censored"]].copy()
+        base_eval = _dialled_only(base)
         test_eval = base_eval[base_eval["contact_point_ref"].isin(set(test_refs))].copy()
         ver_eval = base_eval[base_eval["contact_point_ref"].isin(set(ver_refs))].copy()
 
@@ -468,7 +481,7 @@ def main() -> None:
         cal_feats = feats.copy()
         cal_lab = observed_labels(ev, s.test_start, test_refs, lb["horizon_days"], lb["rpc_network_responses"], lb["rpc_dispositions"])
         cal_base = cal_feats.merge(cal_lab, on="contact_point_ref", how="left")
-        cal_eval = cal_base[~cal_base["censored"]].copy()
+        cal_eval = _dialled_only(cal_base)
         
         # Build segment columns for calibration from available data
         seg_cols = list(DEFAULT_SEGMENT_COLS)
@@ -500,7 +513,12 @@ def main() -> None:
         # Get lender from contact_points (lender_id)
         if "lender" in seg_cols:
             if cps is not None and "lender_id" in cps.columns:
-                lender_map = cps.set_index("contact_point_ref")["lender_id"]
+                # Linkage-grain tables repeat shared phones: modal lender wins
+                # (same deterministic rule as _ref_account_map).
+                _lm = cps.dropna(subset=["lender_id"]).sort_values(
+                    ["contact_point_ref", "lender_id"]).drop_duplicates(
+                    subset=["contact_point_ref"], keep="first")
+                lender_map = _lm.set_index("contact_point_ref")["lender_id"]
                 cal_eval["lender"] = cal_eval["contact_point_ref"].map(lender_map).fillna("unknown")
             elif "lender_id" in cal_eval.columns:
                 cal_eval["lender"] = cal_eval["lender_id"]
@@ -548,7 +566,9 @@ def main() -> None:
             # Policy log should have dialling_arm and selection_propensity columns
             # Validate 1/k formula on random arm
             if "dialling_arm" in policy_log.columns and "selection_propensity" in policy_log.columns:
-                random_arm = policy_log[policy_log["dialling_arm"] == "random"].copy()
+                # Real extracts use "random_contact_point"; fixtures use "random".
+                _arm = policy_log["dialling_arm"].astype(str)
+                random_arm = policy_log[_arm.str.startswith("random")].copy()
                 if len(random_arm) > 0:
                     # Need k (number of candidates) for each dial
                     # Derive from selection_propensity if k_candidates not present (1/k = propensity)
@@ -596,10 +616,14 @@ def main() -> None:
             elif "dialling_arm" not in base_eval.columns:
                 base_eval["dialling_arm"] = "model"
         
-        # Get lender from contact_points
+        # Get lender from contact_points (linkage-grain: modal lender wins,
+        # same deterministic rule as the calibration block above).
         if "lender" in seg_cols:
             if cps is not None and "lender_id" in cps.columns:
-                lender_map = cps.set_index("contact_point_ref")["lender_id"]
+                _lm = cps.dropna(subset=["lender_id"]).sort_values(
+                    ["contact_point_ref", "lender_id"]).drop_duplicates(
+                    subset=["contact_point_ref"], keep="first")
+                lender_map = _lm.set_index("contact_point_ref")["lender_id"]
                 base_eval["lender"] = base_eval["contact_point_ref"].map(lender_map).fillna("unknown")
             elif "lender_id" not in base_eval.columns:
                 base_eval["lender"] = "unknown"
@@ -696,7 +720,7 @@ def main() -> None:
             lab_all = observed_labels(ev, s.test_start, all_refs, lb["horizon_days"],
                                       lb["rpc_network_responses"], lb["rpc_dispositions"])
             pall = fall.merge(lab_all, on="contact_point_ref", how="left")
-            pall["dialled"] = (~pall["censored"]).astype(int)
+            pall["dialled"] = (~pall["censored"].fillna(True).astype(bool)).astype(int)
             prop_frames.append(pall)
 
     # --- Aggregate + metric families ---

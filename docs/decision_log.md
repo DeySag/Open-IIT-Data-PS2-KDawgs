@@ -1,5 +1,63 @@
 # Decision log
 
+## 2026-10-08 - Add-on models setup complete (fit + persist + adapters)
+
+**Result:** `src/rpc/models/train_addons.py` (`make train-addons`, fit-cap
+2026-05-26 = P4 cap) fits all three on TRAIN-window evidence and persists
+`artifacts/{slot,third_party,trace_outcome}/` (config + params + fit
+record + LightGBM `model.txt` where applicable): slot 35,391 attempts
+(global RPC 0.163); third-party 3,671 links (global prior 0.251);
+trace-outcome 392 traces, 0 censored (paid-30d 0.217). Wiring:
+`slot.attach_best_slot` feeds the tracker's existing hook (tested);
+third-party risk and `p_recover_30d` expose score frames but do NOT enter
+the guardrail/VOI path — both are frozen-semantics changes needing
+coordinator sign-off (logged, not built around).
+**Verified:** driver re-runs bit-identical; `test_slot.py` +1 (attach),
+`ruff` clean.
+
+## 2026-10-08 - Eval inputs exporter built; censored-merge fail-safe in run.py
+
+**Result:** new `src/rpc/eval/prepare.py` (`python -m src.rpc.eval.prepare`,
+`make eval-inputs`) + `tests/test_prepare.py` (5 passed). Exports the
+event store + official extracts to `data/events.parquet` (88,654),
+`contact_points.parquet` (5,719, zero refs unknown to the store),
+`borrowers.parquet` (2,400), `policy_log.parquet` (51,105),
+`splits.csv` (copied), `verified_gold.parquet` (250). Join-key rule:
+re-hash IDs with `resolve_pepper` and abort on store mismatch instead of
+emitting unjoinable frames (store uses legacy plain-hash — confirmed by
+matching a live ref). Real-feature adapter is used (features landed);
+borrowers carries allowed columns only; verified gold is eval-only.
+**Fix (same change):** `run.py:_dialled_only` — first real-data run crashed
+at the calibration frame (`~` on float `censored` from a left-merge miss);
+unknown-censored now counts as censored (unknown, never negative) at both
+merge sites. `test_eval.py` still 11 passed.
+**Verified:** exporter self-checks green; full `make eval` A/B running in
+background (`artifacts/eval_new.log`) vs the 0.641 [0.618, 0.661] bar.
+
+## 2026-10-08 - GBMs: capacity-control grid + account best-line aggregation
+
+**Result:** three small changes, all measured mechanically (real-data eval
+pending — see blocker): (1) `make_lgbm` forwards `lambda_l1/lambda_l2`,
+`feature/bagging_fraction`, `bagging_freq` (defaults off — zero behaviour
+change until configured); (2) `configs/eval.yaml` grid retargeted from
+`n_estimators x min_child_samples` to `num_leaves [15, 31] x
+min_child_samples [20, 50]` — same 4 fits/split, now searches tree capacity
+(the likely overfit axis at 200x31 on ~8.6k rows) instead of tree count;
+(3) account GBM aggregates mean + max + `n_contacts` via one shared helper
+used by fit AND score-time paths (previously mean-only, duplicated) — the
+dialer chooses the best line, so the max matters; contract-tested
+(`test_eval.py` +2: best-line/max/count columns, unseen-path consistency).
+**Decisions:** grid budget frozen at 4 (per-split tuning cost); no
+`scale_pos_weight` (link base rate ~0.44 — imbalance is mild, logloss-tuned);
+no early stopping (harness has no holdout inside fit — validation split
+already picks params).
+**Blocker (logged, not built around):** full real-data eval needs
+`data/events.parquet` + contact/borrower/policy frames — no in-repo exporter
+from `event_store.duckdb` exists, so the 0.641-bar A/B awaits that builder;
+changes above are mechanism-tested only.
+**Verified:** `test_eval.py` 11 passed, `test_state_tracker.py` 16 passed;
+`ruff` clean on all touched lines (remaining file hits pre-date this change).
+
 ## 2026-10-08 - Model 9: trace-outcome model (P1) built, causal uplift disclaimed
 
 **Result:** new `src/rpc/models/uplift.py` (`trace_outcome_labels` +
