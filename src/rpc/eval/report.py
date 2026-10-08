@@ -76,6 +76,26 @@ def generate_report(
             L.append("")
             L.append(_md_table(pd.DataFrame(rows), label))
 
+    # P5: Per-segment calibration tables
+    if "segment_ece" in tables:
+        L.append("## Calibration: ECE per segment")
+        L.append("")
+        for model, seg_rows in tables["segment_ece"].items():
+            L.append(f"### {model}")
+            L.append("")
+            L.append(_md_table(pd.DataFrame(seg_rows), label))
+
+    if "segment_reliability" in tables:
+        L.append("## Reliability detail per segment: predicted vs observed")
+        L.append("")
+        for model, seg_dict in tables["segment_reliability"].items():
+            L.append(f"### {model}")
+            L.append("")
+            for seg, rows in seg_dict.items():
+                L.append(f"#### Segment: {seg}")
+                L.append("")
+                L.append(_md_table(pd.DataFrame(rows), label))
+
     if "cross_line" in tables:
         L.append("## Cross-line subset: silent line while borrower reachable elsewhere")
         L.append("")

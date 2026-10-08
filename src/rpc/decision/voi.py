@@ -74,6 +74,50 @@ def trace_cost_for(method: str, costs: dict, override: float | None = None) -> f
     return float(costs.get("skip_trace", {}).get(method, {}).get("cost_per_trace", 100.0))
 
 
+def resolve_costs_for_lender(costs: dict, lender_id: str) -> dict:
+    """Return a lender-resolved copy of the costs config.
+
+    Only the digital skip-trace expected cost varies by lender (P7
+    TRAIN-observed means in ``costs.yaml`` ``per_lender``); lenders with
+    too few observed traces (e.g. L05) and unknown labels fall back to the
+    global TRAIN mean. Explicit per-call ``trace_cost_override`` still wins
+    over the resolved table (see :func:`trace_cost_for`). Never mutates input.
+    """
+    import copy as _copy
+
+    resolved = _copy.deepcopy(costs)
+    table = costs.get("per_lender", {})
+    entry = table.get(str(lender_id), {})
+    expected = ((entry.get("skip_trace", {}) or {}).get("digital", {}) or {}).get("expected_cost")
+    if expected is None:
+        expected = ((table.get("fallback", {}).get("skip_trace", {}) or {}).get("digital", {}) or {}).get(
+            "expected_cost"
+        )
+    if expected is not None:
+        resolved.setdefault("skip_trace", {}).setdefault("digital", {})["cost_per_trace"] = float(expected)
+    return resolved
+
+
+def scale_recovery_gain(costs: dict, factor: float) -> dict:
+    """Return a copy with every recovery-curve gain scaled by ``factor``.
+
+    P7 self-cure bound: accounts that would pay without any contact gain
+    nothing from a trace, so the incremental gain is haircut by
+    ``1 - P(self-cure)`` (TRAIN-observed no-contact payment rate). Never
+    mutates input; ``factor=1.0`` reproduces the base curves exactly.
+    """
+    import copy as _copy
+
+    resolved = _copy.deepcopy(costs)
+    buckets = resolved.get("recovery_curves", {}).get("by_bucket", {})
+    for key, curve in buckets.items():
+        buckets[key] = {
+            "reached": float(curve.get("reached", 0.0)) * float(factor),
+            "not_reached": float(curve.get("not_reached", 0.0)) * float(factor),
+        }
+    return resolved
+
+
 def collection_and_goodwill_cost(costs: dict) -> tuple[float, float]:
     voi_cfg = costs.get("voi_costs", {})
     return (

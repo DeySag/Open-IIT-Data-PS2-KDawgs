@@ -11,9 +11,15 @@ splits:
   seed: 42
 
 labels:
-  horizon_days: 7       # rpc_next_7d window after as_of
-  rpc_network_responses: ["answered"]   # dial_attempt responses counted as observed contact (proxy for RPC; confirm code set against issued extracts)
-  rpc_dispositions: ["RPC", "promise_to_pay", "callback"]  # disposition values counted as observed RPC
+  horizon_days: 7       # rpc_next_7d window after as_of: (as_of, as_of+7d]
+  embargo_days: 3       # gap between train max and test start; nothing scored inside
+  grain: ["account_id", "contact_point_ref"]  # per-(account,phone); never phone_id alone
+  rpc_network_responses: ["answered"]   # AND-joined; answered alone is NOT a label
+  rpc_dispositions: ["RPC", "promise_to_pay", "callback", "dispute"]  # sanctioned canonical set (all 7 raw rpc_*); language_barrier excluded
+  strict_exclude: ["hung_up", "refused"]  # strict sensitivity drops rpc_hung_up/rpc_refused (canonical-strict excludes collapsed RPC)
+  run_strict_sensitivity: true  # report strict-variant metrics alongside primary
+  verified_holdout: "data/ps2_right_party_contact/verified_contact_points.csv"  # holdout gold only; never a train label source
+  dialled_only: true  # undialled links censored (NaN), never negative
 
 # Incumbent attempt-count rule (assumed values pending confirmation against
 # the issued extracts; see docs/dataset_audit.md §6 for the reconstructable
