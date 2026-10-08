@@ -38,6 +38,23 @@ class AccountGBMScorer:
         self._model = make_lgbm(self.params)
         return self
 
+    @staticmethod
+    def _aggregate(fr: pd.DataFrame, acc: pd.Series) -> pd.DataFrame:
+        """Account-grain features: per-column mean + max plus contact count.
+
+        Mean carries the account's typical line; max carries its best line
+        (the dialer's actual choice set); n_contacts carries choice-set size.
+        Single shared helper so fit and score-time paths always agree.
+        """
+        num = fr.drop(columns=["_y"], errors="ignore").select_dtypes(include="number").copy()
+        num["_acc"] = acc.to_numpy()
+        grp = num.groupby("_acc")
+        mean = grp.mean(numeric_only=True).add_suffix("_mean")
+        mx = grp.max(numeric_only=True).add_suffix("_max")
+        out = mean.join(mx)
+        out["n_contacts"] = grp.size()
+        return out.drop(columns=["_acc_mean", "_acc_max"], errors="ignore")
+
     def fit(
         self,
         features: pd.DataFrame,
@@ -57,11 +74,11 @@ class AccountGBMScorer:
                                   "was_dialled_next_7d", "_y")
                       if c in fr.columns]
         fr_num = fr.drop(columns=["contact_point_ref", "_acc", *label_cols])
-        agg = fr_num.groupby(fr["_acc"]).mean(numeric_only=True)
+        agg = self._aggregate(fr_num, fr["_acc"])
         y_acc = fr.groupby("_acc")["_y"].max()  # account contacted if any line was
         self._global_mean = float(y_acc.mean()) if len(y_acc) else 0.5
-        Xa = agg.drop(columns=["_y"], errors="ignore").fillna(0.0).to_numpy(dtype=float)
-        self._agg_columns = list(agg.drop(columns=["_y"], errors="ignore").columns)
+        Xa = agg.fillna(0.0).to_numpy(dtype=float)
+        self._agg_columns = list(agg.columns)
         if len(agg) >= 2 and y_acc.nunique() >= 2:
             self._model.fit(Xa, y_acc.to_numpy())  # type: ignore[union-attr]
         else:  # degenerate: fall back to account mean rate
@@ -102,15 +119,12 @@ class AccountGBMScorer:
         if fr.empty:
             return out
         fr["_acc"] = fr["contact_point_ref"].map(self._cp_account)
-        num = pd.DataFrame(index=fr.index)
-        for c in self._agg_columns:
-            num[c] = pd.to_numeric(fr[c], errors="coerce") if c in fr.columns else np.nan
+        raw = fr.drop(columns=["contact_point_ref", "_acc"], errors="ignore")
         try:
-            Xa = num.groupby(fr["_acc"]).mean(numeric_only=True).reindex(
-                columns=self._agg_columns).fillna(0.0).to_numpy(dtype=float)
-            accs = num.groupby(fr["_acc"]).mean(numeric_only=True).index.tolist()
+            agg = self._aggregate(raw, fr["_acc"]).reindex(columns=self._agg_columns)
+            Xa = agg.fillna(0.0).to_numpy(dtype=float)
             ps = self._model.predict_proba(Xa)[:, 1]  # type: ignore[union-attr]
-            out = {a: float(v) for a, v in zip(accs, ps)}
+            out = {a: float(v) for a, v in zip(agg.index.tolist(), ps)}
         except Exception:
             out = {}
         return out

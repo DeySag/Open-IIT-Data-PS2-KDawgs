@@ -48,7 +48,7 @@ baselines:
   # scoring-only. Small deterministic grid; ties break to the first point.
   tune_on_validation: true
   grid:
-    n_estimators: [100, 200]
+    num_leaves: [15, 31]
     min_child_samples: [20, 50]
 
 # Account snapshot numerics (dpd/bucket/emi/overdue/outstanding/paid_other/

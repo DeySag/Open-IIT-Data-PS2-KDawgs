@@ -1,5 +1,91 @@
 # Decision log
 
+## 2026-10-08 - Model 9: trace-outcome model (P1) built, causal uplift disclaimed
+
+**Result:** new `src/rpc/models/uplift.py` (`trace_outcome_labels` +
+`TraceOutcomeModel`) + `configs/uplift.yaml` (window 30d) +
+`tests/test_uplift.py` (5 passed). Fills the workbook gap (payment-window
+label now exists in a labels module). GBM over caller-supplied pre-trace
+dial history; censored traces excluded, degenerate fit falls back to base
+rate; `result` / `cost_inr` / banned columns can never be features
+(leakage-tested). Real-extract check (fit <= 2026-05-26, test after):
+uncensored paid-30d rate 0.179, test AUC **0.525** (n=329) — random,
+consistent with the P7 VOI-rank null (0.506). Dial history alone does not
+predict post-trace payment.
+**Decisions:** (1) 30d window — 14d too rare (6.8%), 60d half-censored
+(50%); (2) ship the scaffolding with the null result, not a tuned model —
+no account context until snapshot as-of confirmed (CN ask #7), no
+found-phone (post-treatment); (3) NO causal claim: single trigger rule, no
+control arm — true uplift needs a randomized trace holdout (future work);
+VOI keeps its self-cure haircut, this model feeds the trace-conditional leg
+only; (4) no registry wiring yet (see 2026-10-08 integration note below).
+**Assumptions:** payments feed complete to 2026-07-24 (owner: data audit).
+**Verified:** `tests/test_uplift.py` 5 passed; `ruff` clean on new files.
+
+## 2026-10-08 - Integration note: three models land standalone, unwired
+
+Models 5/7/9 do NOT join the eval scorer registry or the decision engine in
+this change: their grains differ from the contact-point `Scorer` protocol
+(slot = multiplier, third-party = link risk, uplift = trace-level), and
+wiring changes eval behaviour — that integration is coordinator-visible work
+with its own tests (registry adapter for slot multipliers into the tracker
+head; third-party risk into the guardrail threshold; `p_recover_30d` into
+`compute_voi`). Workstream boundaries respected per build guidelines §4.
+
+## 2026-10-08 - Model 7: third-party risk scorer (P1) built, risk-only
+
+**Result:** new `src/rpc/models/third_party.py` (`ThirdPartyRiskScorer`) +
+`configs/third_party.yaml` + `tests/test_third_party.py` (6 passed).
+Beta-Binomial: smoothed source priors updated with the link's own pre-`as_of`
+counts; output is risk + audit trail (prior, counts, posterior). No `decide`
+/ threshold / `predict_action` by construction (boundary-tested) — the cutoff
+stays in the decision layer's cost-ratio rule. Real-extract priors (link =
+(account, phone), tp = any third_party_contact/ptp on the link): global
+0.304, employer 0.866 / reference 0.853 / bureau 0.251 / kyc_origination
+0.193 / borrower_update 0.130 / skip_trace 0.138. Eval-only gold hook
+(`gold_check`, Mann-Whitney rank AUC) reads `third_party_number` (74) vs
+`borrower_number` (127); never fit rows.
+**Decisions:** (1) Bayesian update, not an ML fit — no training-serving skew
+possible beyond PIT; (2) weak fit labels (tp disposition in window; true
+status UNKNOWN per audit §5); (3) `source` is link metadata (known at
+`added_date` — only score links with `added_date <= as_of`); thin sources
+(`n < 20`) fall back to global; (4) remark `third_party_cue` counts stay a
+caller-supplied input, not read here — names stay redacted pre-featuring.
+**Alternatives:** GBM on link features (rejected: source priors already
+separate 0.87 vs 0.19 — trees add opacity, not signal, at this sample).
+**Assumptions:** source labels are as-recorded (owner: CN ask #4 codebook —
+`priority_slot`/source semantics unconfirmed).
+**Verified:** `tests/test_third_party.py` 6 passed; `ruff` clean on new files.
+
+## 2026-10-08 - Model 5: time-slot RPC (P1) built, IST assumption flagged
+
+**Result:** new `src/rpc/models/slot.py` (`SlotRPCModel`) + `configs/slot.yaml`
++ `tests/test_slot.py` (6 passed). Smoothed per-(segment, slot) RPC rates
+shrunk toward the global rate, emitted as multipliers on the state tracker
+`p_rpc` head (hook `slot_multiplier_default: 1.0` stays the neutral default).
+Thin (`n < min_samples: 30`) and unseen segments fall back to 1.0 — never
+invent signal. Real-extract check (50,745 dials, fit <= 2026-06-29, pooled):
+global RPC 0.161, afternoon x1.174 / evening x0.858 / morning 1.0 (thin —
+dial mass sits in IST afternoon/evening); per-lender falls back (no
+`lender_id` on raw dials — lender join lands in eval wiring, not here).
+**Decisions:** (1) bins + timezone read from `configs/features.yaml`
+(morning 8-12 / afternoon 12-16 / evening 16-19, `Asia/Kolkata`), hyperparams
+only in `configs/slot.yaml`; (2) label = per-attempt `answered AND
+sanctioned rpc set` (strict variant available), `rpc_*`-without-answer
+quarantined, dialled-only; (3) PIT enforced inside `fit`
+(`occurred_at <= as_of`); banned/hidden columns dropped unread
+(leakage-tested); (4) no wiring into scorer/eval yet — model lands
+standalone first per thin-end-to-end rule.
+**Alternatives:** per-slot GBM (rejected: thin cells need shrinkage, not
+trees); pooling segments into global (rejected: hides lender schedule
+effects — fallback stays neutral instead).
+**Assumptions:** naive timestamps = IST wall-clock (owner: CN ask #1,
+unanswered — dial hours 08-18 fit IST, not UTC; 5:30 shift would move every
+slot feature); `received == occurred` (owner: CN ask #1).
+**Verified:** `tests/test_slot.py` 6 passed; `ruff check src tests` clean on
+new files; mypy shows only the repo-wide missing-stub gaps (`pandas`,
+`yaml`) shared by existing modules.
+
 ## 2026-10-07 - P3: baselines retrained on issued extracts (bar set, quarantine both ways)
 
 **Result:** incumbent / account GBM / contact GBM train and score end-to-end

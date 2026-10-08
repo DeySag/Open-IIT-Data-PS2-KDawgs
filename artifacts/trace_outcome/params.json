@@ -1,0 +1,19 @@
+{
+  "base_rate": 0.21683673469387754,
+  "columns": [
+    "n_attempts",
+    "n_answered",
+    "answer_rate",
+    "consec_failures"
+  ],
+  "params": {
+    "gbm": {
+      "learning_rate": 0.05,
+      "min_child_samples": 20,
+      "n_estimators": 100,
+      "num_leaves": 31
+    },
+    "seed": 42,
+    "window_days": 30
+  }
+}

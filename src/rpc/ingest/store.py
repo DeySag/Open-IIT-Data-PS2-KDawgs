@@ -1,7 +1,7 @@
 """DuckDB-backed append-only event store.
 
 Tables
-------
+-----
 events
     ``event_id`` primary key plus canonical envelope columns, ``payload`` JSON
     and ``ingested_at``. Deduplicated on ``event_id`` keeping the earliest
@@ -15,6 +15,14 @@ dirty_contact_points
 watermarks
     Per-contact-point scoring watermarks written by downstream consumers
     (feature pipeline); read by ingestion to detect late events.
+trace_history
+    Skip-trace outcomes for VOI ranking (never a model predictor).
+accounts / lenders / agents / splits
+    Dimension tables for account context, lender master, agent master, and
+    train/val/test splits. Loaded once from official extracts; never mutated
+    by event ingest.
+verified_contact_points
+    Held-out gold annotations for eval only (never features or predictors).
 
 All bulk operations are SQL over staged views -- no per-row Python loops.
 """
@@ -89,7 +97,100 @@ CREATE TABLE IF NOT EXISTS trace_history (
     new_contact_point_id VARCHAR,
     cost_inr DOUBLE NOT NULL
 );
+CREATE TABLE IF NOT EXISTS accounts (
+    account_id VARCHAR PRIMARY KEY,
+    lender_id VARCHAR NOT NULL,
+    borrower_id VARCHAR NOT NULL,
+    dpd_bucket VARCHAR,
+    outstanding DOUBLE,
+    product VARCHAR,
+    bureau_score_band VARCHAR,
+    income_type VARCHAR,
+    preferred_language VARCHAR,
+    town_id VARCHAR,
+    dpd_start INT,
+    overdue_start DOUBLE,
+    emi_amount DOUBLE,
+    other_active_loans INT,
+    paid_other_lenders_30d BOOLEAN,
+    last_bounce_reason VARCHAR,
+    salary_credit_day VARCHAR,
+    ability_to_pay_estimate VARCHAR,
+    prev_ptp_count INT,
+    prev_ptp_broken INT,
+    quarantined_fields VARCHAR,
+    as_of_confirmed BOOLEAN DEFAULT FALSE,
+    loaded_at TIMESTAMPTZ NOT NULL
+);
+CREATE TABLE IF NOT EXISTS lenders (
+    lender_id VARCHAR PRIMARY KEY,
+    lender_name VARCHAR,
+    lender_type VARCHAR,
+    loaded_at TIMESTAMPTZ NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agents (
+    agent_id VARCHAR PRIMARY KEY,
+    lender_id VARCHAR,
+    agent_name VARCHAR,
+    agent_type VARCHAR,
+    tenure_months INT,
+    loaded_at TIMESTAMPTZ NOT NULL
+);
+CREATE TABLE IF NOT EXISTS splits (
+    account_id VARCHAR PRIMARY KEY,
+    split VARCHAR NOT NULL,
+    loaded_at TIMESTAMPTZ NOT NULL
+);
+CREATE TABLE IF NOT EXISTS verified_contact_points (
+    contact_point_ref VARCHAR PRIMARY KEY,
+    account_id VARCHAR NOT NULL,
+    lender_id VARCHAR NOT NULL,
+    verified_status VARCHAR NOT NULL,
+    verified_date DATE,
+    true_state VARCHAR,
+    loaded_at TIMESTAMPTZ NOT NULL
+);
 """
+
+_DIMENSION_COLUMNS: dict[str, list[str]] = {
+    "accounts": [
+        "account_id",
+        "lender_id",
+        "borrower_id",
+        "dpd_bucket",
+        "outstanding",
+        "product",
+        "bureau_score_band",
+        "income_type",
+        "preferred_language",
+        "town_id",
+        "dpd_start",
+        "overdue_start",
+        "emi_amount",
+        "other_active_loans",
+        "paid_other_lenders_30d",
+        "last_bounce_reason",
+        "salary_credit_day",
+        "ability_to_pay_estimate",
+        "prev_ptp_count",
+        "prev_ptp_broken",
+        "quarantined_fields",
+        "as_of_confirmed",
+        "loaded_at",
+    ],
+    "lenders": ["lender_id", "lender_name", "lender_type", "loaded_at"],
+    "agents": ["agent_id", "lender_id", "agent_name", "agent_type", "tenure_months", "loaded_at"],
+    "splits": ["account_id", "split", "loaded_at"],
+    "verified_contact_points": [
+        "contact_point_ref",
+        "account_id",
+        "lender_id",
+        "verified_status",
+        "verified_date",
+        "true_state",
+        "loaded_at",
+    ],
+}
 
 
 def default_db_path() -> str:
@@ -334,3 +435,67 @@ class EventStore:
             "SELECT trace_id, account_id, trace_date, trigger_rule, result, "
             "new_contact_point_id, cost_inr FROM trace_history ORDER BY trace_date"
         ).fetchdf()
+
+    # -- dimensions (account, lender, agent, split, verified gold) -------------
+
+    def insert_dimension(self, table_name: str, df: pd.DataFrame, primary_key: str) -> int:
+        """Idempotent dimension insert: skip rows whose PK already exists.
+
+        We intentionally stage only the canonical columns for the target table,
+        ignoring any source-only fields that may appear in the official extract.
+        """
+        if df.empty:
+            return 0
+        frame = df.copy()
+        frame["loaded_at"] = datetime.now(UTC)
+
+        columns = _DIMENSION_COLUMNS.get(table_name)
+        if columns is None:
+            raise ValueError(f"Unsupported dimension table: {table_name}")
+
+        ordered = frame.reindex(columns=columns).copy()
+        ordered = ordered.loc[:, columns]
+        self.con.register("_dim_staged", ordered)
+        try:
+            before = self.con.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+            self.con.execute(
+                f"INSERT INTO {table_name} ({', '.join(columns)}) "
+                "SELECT * FROM _dim_staged ON CONFLICT DO NOTHING"
+            )
+            after = self.con.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+        finally:
+            self.con.unregister("_dim_staged")
+        return int(after - before)
+
+    def load_accounts(self, df: pd.DataFrame) -> int:
+        return self.insert_dimension("accounts", df, "account_id")
+
+    def load_lenders(self, df: pd.DataFrame) -> int:
+        return self.insert_dimension("lenders", df, "lender_id")
+
+    def load_agents(self, df: pd.DataFrame) -> int:
+        return self.insert_dimension("agents", df, "agent_id")
+
+    def load_splits(self, df: pd.DataFrame) -> int:
+        return self.insert_dimension("splits", df, "account_id")
+
+    def load_verified_contact_points(self, df: pd.DataFrame) -> int:
+        return self.insert_dimension("verified_contact_points", df, "contact_point_ref")
+
+    def read_verified_contact_points(self) -> pd.DataFrame:
+        return self.con.execute(
+            "SELECT * FROM verified_contact_points"
+        ).fetchdf()
+
+    def read_dimension(self, table_name: str) -> pd.DataFrame:
+        return self.con.execute(f"SELECT * FROM {table_name}").fetchdf()
+
+    def counts(self) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for table in (
+            "events", "dead_letter", "dirty_contact_points", "watermarks",
+            "trace_history", "accounts", "lenders", "agents", "splits",
+            "verified_contact_points",
+        ):
+            out[table] = int(self.con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+        return out

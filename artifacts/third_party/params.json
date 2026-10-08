@@ -1,0 +1,16 @@
+{
+  "global_prior": 0.2508853173522201,
+  "params": {
+    "min_samples": 20,
+    "seed": 42,
+    "smoothing_alpha": 20.0
+  },
+  "source_priors": {
+    "borrower_update": 0.08226156966009868,
+    "bureau": 0.19939437324599468,
+    "employer": 0.8068714819079361,
+    "kyc_origination": 0.16478729825871882,
+    "reference": 0.7902180945246526,
+    "skip_trace": 0.12520120848914093
+  }
+}

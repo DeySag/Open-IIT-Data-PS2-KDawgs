@@ -1,0 +1,7 @@
+# Third-party classifier (workbook model 7, P1).
+# Hyperparameters only — sources are link metadata, thresholds live in the
+# decision layer (cost-ratio rule), never here.
+
+smoothing_alpha: 20.0  # prior strength (pseudo-links) for source priors
+min_samples: 20        # sources with fewer fit links fall back to global
+seed: 42               # recorded for determinism (closed-form, no sampling)

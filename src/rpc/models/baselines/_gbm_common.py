@@ -88,7 +88,11 @@ def to_matrix(features: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
 
 
 def make_lgbm(params: dict) -> object:
-    """LightGBM if installed, else sklearn GradientBoosting fallback (same interface)."""
+    """LightGBM if installed, else sklearn GradientBoosting fallback (same interface).
+
+    Regularization knobs (lambda_l1/lambda_l2, feature/bagging fractions)
+    default to off, preserving old behaviour when unconfigured.
+    """
     try:
         import lightgbm as lgb
 
@@ -97,6 +101,11 @@ def make_lgbm(params: dict) -> object:
             learning_rate=params.get("learning_rate", 0.05),
             num_leaves=params.get("num_leaves", 31),
             min_child_samples=params.get("min_child_samples", 20),
+            reg_alpha=params.get("lambda_l1", 0.0),
+            reg_lambda=params.get("lambda_l2", 0.0),
+            feature_fraction=params.get("feature_fraction", 1.0),
+            bagging_fraction=params.get("bagging_fraction", 1.0),
+            bagging_freq=params.get("bagging_freq", 0),
             random_state=params.get("seed", 42),
             verbose=-1,
         )

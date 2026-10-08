@@ -37,6 +37,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--as-of-range", nargs=3, default=None, metavar=("START", "END", "STEP_DAYS"),
                    help="Snapshot range: start end step_days.")
     p.add_argument("--out", default=None, help="Output parquet path.")
+    p.add_argument("--with-quarantined", action="store_true",
+                   help="Include quarantined account snapshot fields (off by default).")
     p.add_argument("--render-docs", action="store_true",
                    help="Regenerate the registry table in docs/features.md and exit.")
     return p.parse_args(argv)
@@ -110,9 +112,9 @@ def main(argv: list[str] | None = None) -> None:
         as_ofs = [as_utc(latest)]
     out_path = Path(args.out or "data/features_official.parquet")
     if len(as_ofs) == 1:
-        result = build_features(as_ofs[0], source)
+        result = build_features(as_ofs[0], source, with_quarantined=args.with_quarantined)
     else:
-        result = build_training_table(as_ofs, source)
+        result = build_training_table(as_ofs, source, with_quarantined=args.with_quarantined)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     result.to_parquet(out_path, index=False)
     elapsed = time.time() - t0

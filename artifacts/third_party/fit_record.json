@@ -1,0 +1,6 @@
+{
+  "global_prior": 0.2508853173522201,
+  "n_links": 3671,
+  "note": "weak labels (tp disposition in window); true status UNKNOWN",
+  "window_end": "2026-05-26 00:00:00+00:00"
+}

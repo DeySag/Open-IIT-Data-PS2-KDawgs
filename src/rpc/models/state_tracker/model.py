@@ -275,6 +275,9 @@ class StateTracker:
         self.line_meta: dict[str, dict[str, Any]] = {}  # cp_ref -> {borrower_id, type, source}
         self.borrower_dpd: dict[str, str | None] = {}
         self.fitted_: bool = False
+        # Optional per-contact slot multipliers from the slot model
+        # (workbook model 5). Empty = neutral 1.0 everywhere (old behaviour).
+        self._slot_mult: dict[str, float] = {}
 
     # -- internals ---------------------------------------------------------
     def _joint_T(self, dpd: str | None) -> np.ndarray:
@@ -520,6 +523,16 @@ class StateTracker:
             for b, g in slim.groupby("borrower_id")
         }
 
+    def attach_slot_multipliers(self, multipliers: dict[str, float]) -> "StateTracker":
+        """Attach per-contact slot multipliers (model 5 output).
+
+        ``multipliers`` maps contact_point_ref -> unitless multiplier on the
+        ``p_rpc`` head. Missing refs score neutrally (1.0). Detaching: pass
+        ``{}``. Never touches transitions or posteriors — only the head.
+        """
+        self._slot_mult = {str(k): float(v) for k, v in multipliers.items()}
+        return self
+
     def _line_sequences(self, end_day: int | None = None) -> list[dict[str, Any]]:
         assert self.slim is not None
         seqs = []
@@ -558,6 +571,12 @@ class StateTracker:
         s_tr = float(em.get("prior_strength_transition", 20.0))
         s_em = float(em.get("prior_strength_emission", 10.0))
         s_pi = float(em.get("prior_strength_initial", 5.0))
+        # Avoidance-specific strengths (P4 fix): the avoidance chain sees far
+        # fewer transitions than the line-state chain, so the shared 20/5 let
+        # data collapse T_A and pi_a0. Defaults fall back to the shared values
+        # (old behaviour); configs/state_tracker.yaml sets stronger ones.
+        s_tr_A = float(em.get("prior_strength_avoidance", s_tr))
+        s_pi_A = float(em.get("prior_strength_avoidance_init", s_pi))
         cfg0 = config_to_params(self.cfg)  # fixed Dirichlet prior means
         rho = float((self.cfg.get("overrides", {}) or {}).get("rpc_answer", {}).get("avoid_reset", 0.9))
         rho_pay = float((self.cfg.get("overrides", {}) or {}).get("payment", {}).get("avoid_reset", 0.95))
@@ -662,7 +681,7 @@ class StateTracker:
             # M-step with fixed Dirichlet priors
             nA = xi.reshape(N_A, N_S, N_A, N_S).sum(axis=(1, 3))
             pA = cfg0["T_A"]
-            self.params["T_A"] = (nA + s_tr * pA) / (nA + s_tr * pA).sum(axis=1, keepdims=True)
+            self.params["T_A"] = (nA + s_tr_A * pA) / (nA + s_tr_A * pA).sum(axis=1, keepdims=True)
             nS = xi.reshape(N_A, N_S, N_A, N_S).sum(axis=(0, 2))
             pS = cfg0["T_S"]
             row = nS + s_tr * pS
@@ -675,7 +694,7 @@ class StateTracker:
             ).sum(axis=2, keepdims=True)
             pi_s_new = cnt_pi_s + s_pi * cfg0["pi_s"]
             self.params["pi_s"] = pi_s_new / pi_s_new.sum()
-            pi_a_new = cnt_pi_a + s_pi * np.array([1 - cfg0["pi_a0"], cfg0["pi_a0"]])
+            pi_a_new = cnt_pi_a + s_pi_A * np.array([1 - cfg0["pi_a0"], cfg0["pi_a0"]])
             self.params["pi_a0"] = float(pi_a_new[1] / pi_a_new.sum())
             if abs(ll - prev_ll) < tol * max(1.0, abs(ll)):
                 prev_ll = ll
@@ -804,7 +823,10 @@ class StateTracker:
                 joint[a] = cond * pooled[a]
             if self.use_latent:
                 joint = self._apply_silence_shift(joint, grp["lines"], cp, grp["resets"])
-            out.append(self._joint_to_score(cp, joint, as_of_dt, grp["lines"][cp]["last_info_day"], as_of_day, tau, ans))
+            ans_cp = ans * self._slot_mult.get(cp, 1.0)
+            out.append(self._joint_to_score(
+                cp, joint, as_of_dt, grp["lines"][cp]["last_info_day"], as_of_day, tau, ans_cp
+            ))
         return out
 
     def _apply_silence_shift(
@@ -913,6 +935,7 @@ class StateTracker:
         joint[1] = init[6:12]
         tau = float(self.cfg.get("confidence_tau_days", 30.0))
         ans = float(self.params["ans"]) * float(self.cfg.get("slot_multiplier_default", 1.0))
+        ans = ans * self._slot_mult.get(cp, 1.0)
         return self._joint_to_score(cp, joint, as_of, None, 0, tau, ans)
 
     def _address_score(self, cp: str, as_of: datetime) -> ContactPointScore:
@@ -1004,6 +1027,11 @@ class StateTrackerScorer:
         """Fit the underlying tracker on events (no labels). Returns self."""
         self.tracker = StateTracker(config if config is not None else self._config)
         self.tracker.fit(events_df)
+        return self
+
+    def attach_slot_multipliers(self, multipliers: dict[str, float]) -> "StateTrackerScorer":
+        """Pass-through to the tracker's slot-multiplier hook (default: none)."""
+        self.tracker.attach_slot_multipliers(multipliers)
         return self
 
     @property

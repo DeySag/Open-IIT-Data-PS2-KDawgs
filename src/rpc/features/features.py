@@ -167,6 +167,7 @@ def build_features(
     as_of: str | pd.Timestamp,
     source: EventSource,
     contact_point_refs: list[str] | None = None,
+    with_quarantined: bool = False,
 ) -> pd.DataFrame:
     """Build one feature row per contact point known at ``as_of``."""
     t0 = time.time()
@@ -183,6 +184,13 @@ def build_features(
     # extracts emit the rpc_* family as promise_to_pay/callback/dispute/RPC;
     # matching the literal "rpc" alone would miss all of them.
     rpc_family = {str(v).lower() for v in fcfg.get("rpc_dispositions", ["RPC"])}
+
+    # Quarantine: drop snapshot fields until as-of is confirmed.
+    passthroughs = list(fcfg.get("account_passthroughs", []))
+    qcfg = fcfg.get("quarantine", {})
+    if not with_quarantined and not qcfg.get("as_of_confirmed", False):
+        quarantined = set(qcfg.get("account_fields", []))
+        passthroughs = [s for s in passthroughs if not any(c in quarantined for c in s.get("columns", []))]
 
     events = source.load_visible_events(as_of)
     cps = source.load_contact_points(as_of)
@@ -665,14 +673,14 @@ def build_features(
     if not borrowers.empty:
         bor = borrowers.drop_duplicates(subset="borrower_id", keep="first").set_index("borrower_id")
         bor_keys = universe["borrower_id"]
-        for spec_entry in fcfg.get("account_passthroughs", []):
+        for spec_entry in passthroughs:
             col = next((c for c in spec_entry["columns"] if c in bor.columns), None)
             vals = bor[col].reindex(bor_keys.values).values if col is not None \
                 else [None] * len(uidx)
             out[spec_entry["feature"]] = _coerce_passthrough(
                 pd.Series(vals, index=uidx), str(spec_entry["dtype"]))
     else:
-        for spec_entry in fcfg.get("account_passthroughs", []):
+        for spec_entry in passthroughs:
             out[spec_entry["feature"]] = _coerce_passthrough(
                 pd.Series([None] * len(uidx), index=uidx), str(spec_entry["dtype"]))
 
@@ -739,9 +747,10 @@ def build_training_table(
     as_of_dates: list[str | pd.Timestamp],
     source: EventSource,
     contact_point_refs: list[str] | None = None,
+    with_quarantined: bool = False,
 ) -> pd.DataFrame:
     """Stack ``build_features`` over several as_of dates (same code path)."""
-    frames = [build_features(d, source, contact_point_refs) for d in as_of_dates]
+    frames = [build_features(d, source, contact_point_refs, with_quarantined=with_quarantined) for d in as_of_dates]
     if not frames:
         ref = build_features(pd.Timestamp.now(tz="UTC"), source, [])
         return ref.iloc[0:0]

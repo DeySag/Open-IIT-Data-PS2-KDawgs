@@ -1,0 +1,11 @@
+# Time-slot RPC model (workbook model 5, P1).
+# Hyperparameters only — slot bins + timezone live in configs/features.yaml.
+# Timezone ask-CN #1 unanswered: bins are interpreted in features.timezone
+# (Asia/Kolkata assumption); never hard-code a zone here.
+
+smoothing_alpha: 10.0   # pseudo-attempts shrunk toward the segment/global rate
+min_samples: 30         # slots with fewer dialled attempts fall back to 1.0
+clip_lo: 0.5            # multiplier floor (a slot halves p_rpc at most)
+clip_hi: 2.0            # multiplier cap (a slot doubles p_rpc at most)
+segment_col: "lender_id"  # per-segment rates; falls back to global when absent/unseen
+seed: 42                # recorded for determinism (no sampling in this model)

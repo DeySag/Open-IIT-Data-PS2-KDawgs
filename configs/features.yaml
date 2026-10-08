@@ -110,6 +110,22 @@ features:
     - "2026-10-02"
     - "2026-11-08"
 
+quarantine:
+  # Account snapshot fields quarantined until their as-of date is confirmed
+  # (see docs/dataset_audit.md §6). These fields have no timestamp column and
+  # are assumed start-of-window but unconfirmed. The pipeline must run with
+  # and without them.
+  account_fields:
+    - dpd_bucket
+    - outstanding
+    - emi_amount
+    - overdue_start
+    - paid_other_lenders_30d
+    - last_bounce_reason
+  # When false (default), quarantined fields are excluded from feature output.
+  # Pass --with-quarantined to the feature builder to include them.
+  as_of_confirmed: false
+
 labels:
   # Observed-label window: RPC disposition with occurred_at in (as_of, as_of + N days].
   rpc_next_days: 7

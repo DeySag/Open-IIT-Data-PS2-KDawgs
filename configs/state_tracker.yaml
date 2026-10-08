@@ -167,6 +167,12 @@ em:
   prior_strength_transition: 20.0
   prior_strength_emission: 10.0
   prior_strength_initial: 5.0
+  # Avoidance-specific strengths (P4 fix 2026-10-08): the avoidance chain sees
+  # far fewer transitions than the line-state chain, so 20/5 let EM collapse
+  # T_A ([[0.97,0.03],[0.05,0.95]] -> [[0.91,0.09],[0.79,0.21]]) and pi_a0
+  # (0.20 -> 0.024). Omit either key to fall back to the shared value above.
+  prior_strength_avoidance: 150.0
+  prior_strength_avoidance_init: 40.0
   # Minimum emission floor keeps every symbol reachable (numerical safety).
   emission_floor: 1.0e-4
   # Cap fitting cost on large data; borrowers sub-sampled with seed.

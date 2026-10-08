@@ -1,0 +1,11 @@
+# Uplift model (workbook model 9, P1) — trace-conditional recovery.
+# Hyperparameters only. The payment window is a label definition: changing it
+# redefines the target, so it lives here, versioned, not in code.
+
+window_days: 30  # payment within (trace_date, trace_date + 30d]; late-June traces censored
+gbm:
+  n_estimators: 100
+  learning_rate: 0.05
+  num_leaves: 31
+  min_child_samples: 20
+seed: 42

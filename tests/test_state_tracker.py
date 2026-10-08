@@ -335,3 +335,55 @@ def test_em_parameter_recovery():
         n += 1
     acc = hits / n
     assert acc > 1 / 7 + 0.25, f"accuracy {acc:.3f} not above chance by margin"
+
+
+# ---------------------------------------------------------------------------
+# P4 fix: avoidance-prior split + slot-multiplier hook
+# ---------------------------------------------------------------------------
+
+
+def test_slot_hook_defaults_to_neutral(fixture_df, tracker):
+    plain = {s.contact_point_ref: s.p_rpc for s in tracker.score(ASOF)}
+    tracker.attach_slot_multipliers({})
+    same = {s.contact_point_ref: s.p_rpc for s in tracker.score(ASOF)}
+    assert plain == same
+
+
+def test_slot_multiplier_scales_head_only(fixture_df, tracker):
+    before = {s.contact_point_ref: s for s in tracker.score(ASOF)}
+    tracker.attach_slot_multipliers({"L2": 2.0})
+    try:
+        after = {s.contact_point_ref: s for s in tracker.score(ASOF)}
+    finally:
+        tracker.attach_slot_multipliers({})
+    assert after["L2"].p_rpc == pytest.approx(min(1.0, before["L2"].p_rpc * 2.0))
+    assert after["L1"].p_rpc == pytest.approx(before["L1"].p_rpc)
+    # posteriors untouched — the hook scales the head, never the states
+    assert after["L2"].state_posterior == pytest.approx(before["L2"].state_posterior)
+
+
+def test_avoidance_strengths_fall_back_to_shared():
+    from src.rpc.models.state_tracker.model import StateTracker as _ST
+
+    cfg = load_cfg()
+    del cfg["em"]["prior_strength_avoidance"]
+    del cfg["em"]["prior_strength_avoidance_init"]
+    tr = _ST(cfg)
+    assert tr.cfg["em"].get("prior_strength_avoidance", 20.0) == 20.0
+
+
+def test_stronger_avoidance_prior_holds_pi_a0(fixture_df):
+    from src.rpc.models.state_tracker.model import StateTracker as _ST
+
+    weak = load_cfg()
+    weak["em"]["prior_strength_avoidance"] = 1e-9
+    weak["em"]["prior_strength_avoidance_init"] = 1e-9
+    strong = load_cfg()
+    strong["em"]["prior_strength_avoidance"] = 1e9
+    strong["em"]["prior_strength_avoidance_init"] = 1e9
+    tr_w, tr_s = _ST(weak), _ST(strong)
+    tr_w.fit(fixture_df)
+    tr_s.fit(fixture_df)
+    prior_a0 = float(_ST(load_cfg()).params["pi_a0"])
+    assert abs(tr_s.params["pi_a0"] - prior_a0) < abs(tr_w.params["pi_a0"] - prior_a0)
+    assert tr_s.params["pi_a0"] == pytest.approx(prior_a0, rel=0.05)

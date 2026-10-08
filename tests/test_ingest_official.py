@@ -22,7 +22,8 @@ from src.rpc.ingest import (
     load_trace_history,
     read_trace_history,
 )
-from src.rpc.ingest.store import IngestConfig
+from src.rpc.ingest.dimensions import load_accounts
+from src.rpc.ingest.store import EventStore, IngestConfig
 
 
 def store_path(tmp_path: Path) -> str:
@@ -160,6 +161,47 @@ def test_trace_history_rejects_bad_rows(tmp_path: Path):
     pd.DataFrame(rows).to_csv(path, index=False)
     res = load_trace_history(path, db_path=store_path(tmp_path))
     assert res == EXPECTED_TRACE_SUMMARY_ONE_REJECT
+
+
+def test_load_accounts_maps_official_columns_to_store_schema(tmp_path: Path):
+    path = tmp_path / "accounts.csv"
+    pd.DataFrame(
+        [
+            {
+                "account_id": "ACC_1",
+                "lender_id": "L1",
+                "portfolio": "unsecured",
+                "income_type": "salaried",
+                "town_id": "T1",
+                "preferred_language": "en",
+                "bucket_start": "X",
+                "dpd_start": "0",
+                "emi_amount": "1000",
+                "overdue_start": "0",
+                "outstanding": "5000",
+                "salary_credit_day": "5",
+                "bureau_score_band": "A",
+                "other_active_loans": "0",
+                "paid_other_lenders_30d": "0",
+                "last_bounce_reason": "",
+                "ability_to_pay_estimate": "0.5",
+                "prev_ptp_count": "0",
+                "prev_ptp_broken": "0",
+                "dialling_arm": "rule",
+            }
+        ]
+    ).to_csv(path, index=False)
+
+    store = EventStore(db_path=str(tmp_path / "store.duckdb"))
+    loaded = load_accounts(store, path)
+    assert loaded == 1
+    row = store.read_dimension("accounts").iloc[0]
+    assert row["account_id"] == "ACC_1"
+    assert row["borrower_id"] == "ACC_1"
+    assert row["product"] == "unsecured"
+    assert row["dpd_bucket"] == "X"
+    assert row["town_id"] == "T1"
+    assert row["outstanding"] == 5000.0
 
 
 def test_cli_subset_runs_on_tmp_datasets(tmp_path: Path):

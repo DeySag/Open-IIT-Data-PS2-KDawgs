@@ -1,0 +1,8 @@
+{
+  "booster": "model.txt",
+  "n_traces": 392,
+  "n_uncensored": 392,
+  "note": "trace-conditional only; NOT causal uplift (no control arm)",
+  "paid_rate": 0.21683673469387754,
+  "window_end": "2026-05-26 00:00:00+00:00"
+}

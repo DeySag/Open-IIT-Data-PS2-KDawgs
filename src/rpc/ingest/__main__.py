@@ -1,11 +1,19 @@
 """Official-extract ingest CLI: ``python -m src.rpc.ingest [options]``.
 
 Ingests all 11 official CSVs from ``datasets/`` into the DuckDB event store:
-account-keyed event sources are joined to ``lender_id`` from accounts.csv
-first; ``dial_attempts.csv`` yields two event streams (attempt + disposition);
-``skip_traces.csv`` goes to the trace-history table (VOI inputs only, never
-a predictor). ``accounts``/``lenders``/``agents``/``splits``/``verified`` are
-dimensions for later tasks, not events, and are skipped here.
+
+Phase 1 — dimensions (idempotent, rebuilt each run):
+  ``accounts``, ``lenders``, ``agents``, ``splits``, ``verified_contact_points``
+
+Phase 2 — events (canonical envelope via mapping):
+  dial_attempts, phones, addresses, payments, field_visits
+
+Phase 3 — VOI history (separate table, never a predictor):
+  skip_traces
+
+Account-keyed event sources are joined to ``lender_id`` from accounts.csv
+first. ``skip_traces.csv`` goes to the trace-history table (VOI inputs only,
+never a predictor).
 """
 
 from __future__ import annotations
@@ -21,6 +29,13 @@ from pathlib import Path
 import pandas as pd
 
 from src.rpc.ingest.adapter import IngestAdapter, load_input
+from src.rpc.ingest.dimensions import (
+    load_accounts,
+    load_agents,
+    load_lenders,
+    load_splits,
+    load_verified_contact_points,
+)
 from src.rpc.ingest.enrich import attach_lender_id, load_lender_lookup
 from src.rpc.ingest.mapping import load_mapping
 from src.rpc.ingest.normalize import REDACTED, redact_record
@@ -38,6 +53,14 @@ EVENT_PLAN: tuple[tuple[str, str], ...] = (
     ("addresses.csv", "cn_addresses"),
     ("payments.csv", "cn_payments"),
     ("field_visits.csv", "cn_field_visits"),
+)
+
+DIMENSION_FILES: tuple[tuple[str, str], ...] = (
+    ("accounts.csv", "accounts"),
+    ("lenders.csv", "lenders"),
+    ("agents.csv", "agents"),
+    ("splits.csv", "splits"),
+    ("verified_contact_points.csv", "verified_contact_points"),
 )
 
 TRACES_FILE = "skip_traces.csv"
@@ -115,56 +138,112 @@ def main(argv: list[str] | None = None) -> int:
     accounts_path = Path(args.accounts) if args.accounts else datasets / ACCOUNTS_FILE
 
     only = set(args.only) if args.only else None
-    plan = [step for step in EVENT_PLAN if only is None or step[1] in only]
-    want_traces = only is None or "traces" in only
 
-    missing_files = [f for f, _ in plan if not (datasets / f).exists()]
-    if want_traces and not (datasets / TRACES_FILE).exists():
-        missing_files.append(TRACES_FILE)
-    if not accounts_path.exists():
-        missing_files.append(str(accounts_path))
-    if missing_files:
-        sys.stderr.write(f"missing input files: {sorted(set(missing_files))}\n")
-        return 2
-    for _, source in plan:
-        if load_mapping(source) is None:
-            sys.stderr.write(f"missing mapping for source={source}\n")
+    # Determine which phases to run.
+    want_dims = only is None or only.intersection({"accounts", "lenders", "agents", "splits", "verified_contact_points"})
+    want_events = only is None or only.intersection({s for _, s in EVENT_PLAN})
+    want_traces = only is None or "traces" in only
+    config = IngestConfig(db_path=args.db or default_db_path())
+
+    # ---- Phase 1: dimensions ------------------------------------------------
+    if want_dims:
+        dim_plan = [step for step in DIMENSION_FILES if only is None or step[1] in only]
+        dim_missing = [f for f, _ in dim_plan if not (datasets / f).exists()]
+        if accounts_path.exists():
+            dim_missing = [m for m in dim_missing if m != ACCOUNTS_FILE]
+        if dim_missing:
+            sys.stderr.write(f"missing dimension files: {sorted(set(dim_missing))}\n")
             return 2
 
-    config = IngestConfig(db_path=args.db or default_db_path())
-    lookup = load_lender_lookup(accounts_path)
-    adapter = IngestAdapter(config)
+        db_path = args.db or default_db_path()
+        store = EventStore(db_path=db_path)
+        lookup = load_lender_lookup(accounts_path)
+        dim_summary: dict[str, dict[str, int]] = {}
 
-    summary: dict[str, dict[str, int]] = {}
-    for filename, source in plan:
-        raw = load_input(datasets / filename)
-        enriched, _ = attach_lender_id(raw, lookup, source=source)
-        n_quarantined = 0
-        if source == "cn_dial_dispositions":
-            enriched, quarantined = split_quarantined_rpc_without_answer(enriched)
-            n_quarantined = len(quarantined)
-            if n_quarantined:
-                store = EventStore(config.db_path)
-                try:
-                    store.insert_dead_letter(
-                        _quarantine_dead_rows(
-                            quarantined, source, datetime.now(UTC)
+        for filename, table in dim_plan:
+            if table == "accounts":
+                from src.rpc.features.spec import load_feature_config
+                fcfg = load_feature_config()
+                quarantined = fcfg.get("quarantine", {}).get("account_fields", [])
+                n = load_accounts(store, accounts_path, quarantined_fields=quarantined)
+            elif table == "lenders":
+                n = load_lenders(store, datasets / filename)
+            elif table == "agents":
+                n = load_agents(store, datasets / filename)
+            elif table == "splits":
+                n = load_splits(store, datasets / filename)
+            elif table == "verified_contact_points":
+                n = load_verified_contact_points(store, datasets / filename)
+            else:
+                continue
+            dim_summary[table] = {"loaded": n}
+            logger.info("dimension %s: %d rows loaded", table, n)
+
+    # ---- Phase 2: events ----------------------------------------------------
+    if want_events:
+        plan = [step for step in EVENT_PLAN if only is None or step[1] in only]
+        event_missing = [f for f, _ in plan if not (datasets / f).exists()]
+        if not accounts_path.exists():
+            event_missing.append(ACCOUNTS_FILE)
+        if event_missing:
+            sys.stderr.write(f"missing event files: {sorted(set(event_missing))}\n")
+            return 2
+        for _, source in plan:
+            if load_mapping(source) is None:
+                sys.stderr.write(f"missing mapping for source={source}\n")
+                return 2
+
+        config = config if want_dims else IngestConfig(db_path=args.db or default_db_path())
+        lookup = load_lender_lookup(accounts_path)
+        adapter = IngestAdapter(config)
+
+        event_summary: dict[str, dict[str, int]] = {}
+        for filename, source in plan:
+            raw = load_input(datasets / filename)
+            enriched, _ = attach_lender_id(raw, lookup, source=source)
+            n_quarantined = 0
+            if source == "cn_dial_dispositions":
+                enriched, quarantined = split_quarantined_rpc_without_answer(enriched)
+                n_quarantined = len(quarantined)
+                if n_quarantined:
+                    qstore = EventStore(config.db_path)
+                    try:
+                        qstore.insert_dead_letter(
+                            _quarantine_dead_rows(
+                                quarantined, source, datetime.now(UTC)
+                            )
                         )
+                    finally:
+                        qstore.close()
+                    logger.info(
+                        "quarantine source=%s rows=%d reason=%s",
+                        source,
+                        n_quarantined,
+                        QUARANTINE_REASON,
                     )
-                finally:
-                    store.close()
-                logger.info(
-                    "quarantine source=%s rows=%d reason=%s",
-                    source,
-                    n_quarantined,
-                    QUARANTINE_REASON,
-                )
-        summary[source] = adapter.ingest(enriched, source)
-        summary[source]["quarantined"] = n_quarantined
+            event_summary[source] = adapter.ingest(enriched, source)
+            event_summary[source]["quarantined"] = n_quarantined
+
+    # ---- Phase 3: VOI trace history ------------------------------------------
     if want_traces:
-        summary["traces"] = load_trace_history(
-            datasets / TRACES_FILE, config=IngestConfig(db_path=config.db_path)
-        )
+        if not (datasets / TRACES_FILE).exists():
+            sys.stderr.write(f"missing trace file: {TRACES_FILE}\n")
+            return 2
+        config = config if (want_dims or want_events) else IngestConfig(db_path=args.db or default_db_path())
+        trace_summary = {
+            "traces": load_trace_history(
+                datasets / TRACES_FILE, config=IngestConfig(db_path=config.db_path)
+            )
+        }
+
+    # ---- Output -------------------------------------------------------------
+    summary: dict[str, dict[str, int]] = {}
+    if want_dims:
+        summary.update(dim_summary)
+    if want_events:
+        summary.update(event_summary)
+    if want_traces:
+        summary.update(trace_summary)
 
     totals = {
         key: sum(step.get(key, 0) for step in summary.values())

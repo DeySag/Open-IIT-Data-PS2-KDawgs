@@ -1,0 +1,38 @@
+{
+  "counts": {
+    "all|afternoon": 13226,
+    "all|evening": 14204,
+    "all|off_hours": 7961
+  },
+  "fitted_as_of": "2026-05-26 00:00:00+00:00",
+  "global_n": 35391,
+  "global_rate": 0.16295103274843886,
+  "params": {
+    "clip_hi": 2.0,
+    "clip_lo": 0.5,
+    "min_samples": 30,
+    "seed": 42,
+    "segment_col": "lender_id",
+    "slots": {
+      "afternoon": [
+        12,
+        16
+      ],
+      "evening": [
+        16,
+        19
+      ],
+      "morning": [
+        8,
+        12
+      ]
+    },
+    "smoothing_alpha": 10.0,
+    "timezone": "Asia/Kolkata"
+  },
+  "rates": {
+    "all|afternoon": 0.19096626702383532,
+    "all|evening": 0.13955462996534998,
+    "all|off_hours": 0.15815198975379305
+  }
+}
